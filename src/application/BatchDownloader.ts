@@ -1,0 +1,104 @@
+import { AuthenticationError } from "../domain/errors.ts";
+import type { CourseItem } from "../domain/catalog.ts";
+import type { Tracer } from "../tracing/Tracer.ts";
+import type { ItemOutcome, ItemTransfer } from "./ItemDownloader.ts";
+import type { NamePlanner } from "./NamePlanner.ts";
+import type { Logger } from "./ports.ts";
+
+export interface BatchReport {
+  readonly outcomes: ItemOutcome[];
+  readonly downloaded: number;
+  readonly skipped: number;
+  readonly failed: number;
+  /** El lote se detuvo antes de terminar (sesión caducada). */
+  readonly aborted: boolean;
+}
+
+interface PoolState {
+  next: number;
+  done: number;
+  aborted: boolean;
+}
+
+/**
+ * Descarga una selección con paralelismo acotado. El fallo de un ítem no detiene los demás;
+ * una sesión caducada sí, porque todos los siguientes fallarían igual.
+ */
+export class BatchDownloader {
+  private readonly items: ItemTransfer;
+  private readonly planner: NamePlanner;
+  private readonly logger: Logger;
+  private readonly tracer: Tracer;
+  private readonly concurrency: number;
+
+  constructor(deps: {
+    items: ItemTransfer;
+    planner: NamePlanner;
+    logger: Logger;
+    tracer: Tracer;
+    settings: { concurrency: number };
+  }) {
+    this.items = deps.items;
+    this.planner = deps.planner;
+    this.logger = deps.logger;
+    this.tracer = deps.tracer;
+    this.concurrency = deps.settings.concurrency;
+  }
+
+  async run(items: readonly CourseItem[], destRoot: string): Promise<BatchReport> {
+    this.tracer.event("info", "download", "batch.start", { total: items.length, concurrency: this.concurrency });
+    const plan = this.planner.plan(items);
+    const slots = new Array<ItemOutcome | undefined>(items.length);
+    const state: PoolState = { next: 0, done: 0, aborted: false };
+    const workers = Math.min(this.concurrency, items.length);
+
+    await Promise.all(Array.from({ length: workers }, () => this.runWorker(items, plan, destRoot, slots, state)));
+
+    const outcomes = slots.filter((outcome): outcome is ItemOutcome => outcome !== undefined);
+    const report: BatchReport = {
+      outcomes,
+      downloaded: outcomes.filter((outcome) => outcome.status === "downloaded").length,
+      skipped: outcomes.filter((outcome) => outcome.status === "skipped").length,
+      failed: outcomes.filter((outcome) => outcome.status === "failed").length,
+      aborted: state.aborted,
+    };
+    this.tracer.event("info", "download", "batch.end", {
+      downloaded: report.downloaded,
+      skipped: report.skipped,
+      failed: report.failed,
+      aborted: report.aborted,
+    });
+    return report;
+  }
+
+  private async runWorker(
+    items: readonly CourseItem[],
+    plan: ReadonlyMap<string, string>,
+    destRoot: string,
+    slots: Array<ItemOutcome | undefined>,
+    state: PoolState,
+  ): Promise<void> {
+    while (!state.aborted && state.next < items.length) {
+      const index = state.next;
+      state.next += 1;
+      const item = items[index]!;
+      slots[index] = await this.attempt(item, { destRoot, baseName: plan.get(item.id)! }, state);
+      state.done += 1;
+      this.logger.progress({ done: state.done, total: items.length, label: item.name });
+    }
+  }
+
+  private async attempt(
+    item: CourseItem,
+    target: { destRoot: string; baseName: string },
+    state: PoolState,
+  ): Promise<ItemOutcome> {
+    try {
+      return await this.items.download(item, target);
+    } catch (error) {
+      const authentication = error instanceof AuthenticationError;
+      if (authentication) state.aborted = true;
+      return { item, status: "failed", error, authentication };
+    }
+  }
+}
