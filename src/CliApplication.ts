@@ -35,8 +35,7 @@ import { NullTracer } from "./tracing/NullTracer.ts";
 import { Redactor } from "./tracing/Redactor.ts";
 import { TraceRecorder } from "./tracing/TraceRecorder.ts";
 import type { Tracer } from "./tracing/Tracer.ts";
-const PROGRAM_NAME = "scorm-to-pdf";
-const VERSION = "1.0.0";
+import { PROGRAM_NAME, VERSION } from "./version.ts";
 
 export interface CliApplicationDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
