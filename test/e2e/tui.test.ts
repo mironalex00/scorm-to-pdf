@@ -1,0 +1,144 @@
+import { after, afterEach, beforeEach, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CliApplication } from "../../src/CliApplication.ts";
+import type { KeyPress } from "../../src/tui/Terminal.ts";
+import { FakeMoodle } from "../support/FakeMoodle.ts";
+import type { FakeMoodleOptions } from "../support/FakeMoodle.ts";
+import type { LocalServer } from "../support/LocalServer.ts";
+import { ScriptedTerminal, chars, key } from "../support/ScriptedTerminal.ts";
+import { CapturedStream } from "../support/streams.ts";
+
+const COOKIE = "cookie-secret-98765";
+const base: FakeMoodleOptions = { scormId: 10067, revision: 3, title: "AFSD · Curs 5. X", slideCount: 2, validCookie: COOKIE };
+
+let work: string;
+beforeEach(async () => {
+  work = await mkdtemp(join(tmpdir(), "scorm-tui-"));
+});
+afterEach(() => rm(work, { recursive: true, force: true }));
+
+const servers: LocalServer[] = [];
+async function server(options: Partial<FakeMoodleOptions> = {}): Promise<LocalServer> {
+  const started = await FakeMoodle.start({ ...base, ...options });
+  servers.push(started);
+  return started;
+}
+after(() => Promise.all(servers.map((s) => s.close())));
+
+async function run(moodle: LocalServer, keys: KeyPress[], env: Record<string, string | undefined> = {}, argv: string[] = []) {
+  const terminal = new ScriptedTerminal(keys);
+  const stdout = new CapturedStream();
+  const stderr = new CapturedStream();
+  const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, ...env }, stdout, stderr, cwd: work, terminal });
+  const code = await app.run([...argv, "--base-url", moodle.origin]);
+  return { code, terminal, stdout: stdout.output, stderr: stderr.output };
+}
+const pdfs = async (dir: string): Promise<string[]> =>
+  (await readdir(dir, { recursive: true })).map(String).filter((n) => n.endsWith(".pdf")).sort();
+
+// Curso 1 de la lista alfabética: «Algoritmi fundamentali»; sus semanas 0, 1 y 3.
+const chooseFirstCourseAndMarkAll = [key("enter"), ...chars("A"), key("enter")];
+
+describe("e2e · selector interactivo", () => {
+  it("curso → todo → confirmar → carpeta actual: descarga ordenada por semanas y sale con éxito", async () => {
+    const moodle = await server();
+    const { code, terminal, stdout, stderr } = await run(moodle, [...chooseFirstCourseAndMarkAll, key("enter"), key("enter")]);
+
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(await pdfs(work), ["0/Programa.pdf", "1/Curs 5. Funcții.pdf", "1/Exerciții & teme.pdf", "3/Complementar.pdf"]);
+    assert.equal((await readFile(join(work, "1/Curs 5. Funcții.pdf"))).subarray(0, 4).toString("latin1"), "%PDF");
+    assert.match(stdout, /^✓ Descarga completada: 4 archivos nuevos, 0 ya existían/);
+    assert.equal(stderr, "");
+    assert.deepEqual([terminal.opened, terminal.closed, terminal.remainingKeys], [1, 1, 0]);
+    assert.match(terminal.allFrames(), /Algoritmi fundamentali[\s\S]*Structuri de date/);
+    assert.deepEqual((await readdir(work)).filter((n) => n.startsWith("scorm-trace-")), [], "un éxito no deja traza");
+  });
+
+  it("una ruta de destino escrita a mano se respeta", async () => {
+    const custom = join(work, "mi", "material");
+    const keys = [...chooseFirstCourseAndMarkAll, key("enter"), key("down"), key("enter"), ...chars(custom), key("enter")];
+    const { code } = await run(await server(), keys);
+    assert.equal(code, 0);
+    assert.deepEqual(await pdfs(custom), ["0/Programa.pdf", "1/Curs 5. Funcții.pdf", "1/Exerciții & teme.pdf", "3/Complementar.pdf"]);
+  });
+
+  it("muestra una subsección del cuerpo del curso y descarga su material", async () => {
+    const { code, terminal, stderr } = await run(await server(), [
+      key("down"), key("enter"), key("space"), key("enter"), key("enter"), key("enter"),
+    ]);
+    assert.equal(code, 0, stderr);
+    assert.match(terminal.allFrames(), /Semana 2 — Tema[\s\S]*Tema 1 {2}\(recurso\)/);
+    assert.deepEqual(await pdfs(work), ["2/Tema 1.pdf"]);
+  });
+
+  it("puede elegir solo una semana con a y descargarla", async () => {
+    // Cursor en la primera semana (0): «a» marca solo Programa.
+    const { code } = await run(await server(), [key("enter"), ...chars("a"), key("enter"), key("enter"), key("enter")]);
+    assert.equal(code, 0);
+    assert.deepEqual(await pdfs(work), ["0/Programa.pdf"]);
+  });
+
+  it("Ctrl+C cancela con 130, restaura la terminal y no deja archivos ni traza", async () => {
+    const { code, terminal, stderr } = await run(await server(), [key("enter"), key("ctrl-c")]);
+    assert.equal(code, 130);
+    assert.equal(stderr, "Cancelado.\n");
+    assert.equal(terminal.closed, 1);
+    assert.deepEqual(await readdir(work), []);
+  });
+
+  it("un fallo parcial muestra los errores, descarga el resto, sale con 1 y deja traza", async () => {
+    const moodle = await server({ failItems: ["531"] });
+    const { code, terminal, stderr } = await run(moodle, [...chooseFirstCourseAndMarkAll, key("enter"), key("enter"), key("space")]);
+    assert.equal(code, 1);
+    assert.match(terminal.allFrames(), /Hubo errores en la descarga[\s\S]*Fallo en «Complementar»/);
+    assert.match(stderr, /Fallo en «Complementar»[\s\S]*Descargados: 3 · Omitidos: 0 · Fallidos: 1[\s\S]*Traza guardada en/);
+    assert.deepEqual(await pdfs(work), ["0/Programa.pdf", "1/Curs 5. Funcții.pdf", "1/Exerciții & teme.pdf"]);
+  });
+
+  it("una sesión no válida termina con 3 y la terminal restaurada", async () => {
+    const { code, terminal, stderr } = await run(await server(), [], { MOODLE_COOKIE: "caducada-000000" });
+    assert.equal(code, 3);
+    assert.match(stderr, /Moodle no reconoce la sesión/);
+    assert.deepEqual([terminal.opened, terminal.closed], [1, 1]);
+  });
+
+  it("--trace guarda la traza completa y avisa de dónde queda", async () => {
+    const traceDir = join(work, "traza");
+    const { code, stderr } = await run(await server(), [key("escape")], {}, ["--trace", "--trace-dir", traceDir]);
+    assert.equal(code, 130);
+    assert.match(stderr, /Traza guardada en/);
+    assert.match(await readFile(join(traceDir, "trace.jsonl"), "utf8"), /"name":"run.start"[\s\S]*"command":"tui"/);
+  });
+});
+
+describe("e2e · cookie en el selector", () => {
+  it("si falta MOODLE_COOKIE la pide con la entrada oculta y sigue; el valor no aparece en pantalla", async () => {
+    const { code, terminal } = await run(await server(), [...chars(COOKIE), key("enter"), key("escape")], { MOODLE_COOKIE: undefined });
+    assert.equal(code, 130);
+    const frames = terminal.allFrames();
+    assert.ok(!frames.includes(COOKIE));
+    assert.match(frames, /Falta la cookie de sesión de Moodle[\s\S]*Algoritmi fundamentali/);
+    assert.equal(terminal.opened, 2, "una vez para la cookie y otra para el selector");
+  });
+
+  it("si se cancela el aviso de cookie es un error de uso", async () => {
+    const { code, stderr } = await run(await server(), [key("escape")], { MOODLE_COOKIE: "  " });
+    assert.equal(code, 2);
+    assert.match(stderr, /Falta MOODLE_COOKIE/);
+  });
+});
+
+describe("e2e · sin terminal interactiva", () => {
+  it("un terminal que no es TTY no abre el selector", async () => {
+    const terminal = new ScriptedTerminal([]);
+    terminal.interactive = false;
+    const stderr = new CapturedStream();
+    const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE }, stdout: new CapturedStream(), stderr, cwd: work, terminal });
+    assert.equal(await app.run([]), 2);
+    assert.match(stderr.output, /selector interactivo necesita una terminal/);
+    assert.equal(terminal.opened, 0);
+  });
+});
