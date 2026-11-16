@@ -1,0 +1,18 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { inspect } from "node:util";
+import { Secret } from "../../src/store/Secret.ts";
+
+describe("Secret", () => {
+  it("entrega su valor solo con reveal()", () => {
+    assert.equal(Secret.of("abc123", "sesskey").reveal(), "abc123");
+  });
+
+  it("nunca muestra el valor al convertirlo en texto, JSON o inspeccionarlo", () => {
+    const secret = Secret.of("abc123", "sesskey");
+    for (const out of [String(secret), `${secret}`, JSON.stringify(secret), inspect(secret)]) {
+      assert.ok(!out.includes("abc123"));
+      assert.match(out, /sesskey/);
+    }
+  });
+});
