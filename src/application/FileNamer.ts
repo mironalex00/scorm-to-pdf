@@ -63,8 +63,8 @@ export class FileNamer {
     return names;
   }
 
-  itemPath(destRoot: string, item: CourseItem, fileName: string, sectionFolder?: string): string {
-    return join(destRoot, sectionFolder ?? this.sectionDir(item.sectionNumber), fileName);
+  itemPath(destRoot: string, item: CourseItem, fileName: string, sectionFolder?: string, itemFolder = ""): string {
+    return join(destRoot, sectionFolder ?? this.sectionDir(item.sectionNumber), itemFolder, fileName);
   }
 
   private extensionFor(sourceFileName: string, contentType: string | undefined): string {

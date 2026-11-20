@@ -7,20 +7,34 @@ import { ListScreen } from "./ListScreen.ts";
 export class CourseSelectionScreen implements Screen<readonly CourseSummary[]> {
   private readonly courses: readonly CourseSummary[];
   private readonly marked: Set<string>;
+  private readonly withMaterials: ReadonlySet<string>;
+  private readonly discardMaterials: (id: string) => void;
   private readonly list: ListScreen<CourseSummary>;
   private readonly messages: Messages["tui"];
 
-  constructor(deps: { courses: readonly CourseSummary[]; marked: Set<string>; layout: FrameLayout; messages: Messages }) {
+  constructor(deps: {
+    courses: readonly CourseSummary[];
+    marked: Set<string>;
+    withMaterials: Set<string>;
+    discardMaterials: (id: string) => void;
+    layout: FrameLayout;
+    messages: Messages;
+  }) {
     const { courses, marked, layout, messages: { tui } } = deps;
     this.courses = courses;
     this.marked = marked;
+    this.withMaterials = deps.withMaterials;
+    this.discardMaterials = (id) => {
+      deps.withMaterials.delete(id);
+      deps.discardMaterials(id);
+    };
     this.messages = tui;
     this.list = new ListScreen({
       title: tui.coursesTitle(),
       footer: tui.keysCourses(),
       items: courses.map((course) => ({
         value: course,
-        get label() { return `[${marked.has(course.id) ? "x" : " "}] ${course.name}`; },
+        get label() { return `[${marked.has(course.id) || deps.withMaterials.has(course.id) ? "x" : " "}] ${course.name}`; },
       })),
       emptyMessage: tui.noCourses(),
       layout,
@@ -28,7 +42,8 @@ export class CourseSelectionScreen implements Screen<readonly CourseSummary[]> {
   }
 
   render(size: TerminalSize): string[] {
-    return this.list.render(size, this.messages.markedCourses({ count: String(this.marked.size) }));
+    const count = new Set([...this.marked, ...this.withMaterials]).size;
+    return this.list.render(size, this.messages.markedCourses({ count: String(count) }));
   }
 
   press(key: KeyPress): ScreenResult<readonly CourseSummary[]> {
@@ -36,14 +51,18 @@ export class CourseSelectionScreen implements Screen<readonly CourseSummary[]> {
       const focused = this.list.press({ name: "enter" });
       if (focused.kind === "done") {
         const id = focused.value.id;
-        if (this.marked.has(id)) this.marked.delete(id);
-        else this.marked.add(id);
+        if (this.marked.has(id) || this.withMaterials.has(id)) {
+          this.marked.delete(id);
+          this.discardMaterials(id);
+        } else this.marked.add(id);
       }
       return { kind: "stay" };
     }
     if (key.name === "char" && key.char === "A") {
-      if (this.marked.size === this.courses.length) this.marked.clear();
-      else for (const course of this.courses) this.marked.add(course.id);
+      if (new Set([...this.marked, ...this.withMaterials]).size === this.courses.length) {
+        this.marked.clear();
+        for (const { id } of this.courses) this.discardMaterials(id);
+      } else for (const course of this.courses) this.marked.add(course.id);
       return { kind: "stay" };
     }
 

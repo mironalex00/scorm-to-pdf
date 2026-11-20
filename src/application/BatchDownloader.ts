@@ -45,15 +45,15 @@ export class BatchDownloader {
     this.concurrency = deps.settings.concurrency;
   }
 
-  async run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[] = []): Promise<BatchReport> {
+  async run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[] = [], itemFolders?: { allItems: readonly CourseItem[] }): Promise<BatchReport> {
     this.tracer.event("info", "download", "batch.start", { total: items.length, concurrency: this.concurrency });
-    const plan = this.planner.plan(items);
+    const plan = this.planner.plan(itemFolders?.allItems ?? items);
     const folders = this.planner.sectionFolders(sections);
     const slots = new Array<ItemOutcome | undefined>(items.length);
     const state: PoolState = { next: 0, done: 0, aborted: false };
     const workers = Math.min(this.concurrency, items.length);
 
-    await Promise.all(Array.from({ length: workers }, () => this.runWorker(items, plan, folders, destRoot, slots, state)));
+    await Promise.all(Array.from({ length: workers }, () => this.runWorker(items, plan, folders, destRoot, slots, state, itemFolders !== undefined)));
 
     const outcomes = slots.filter((outcome): outcome is ItemOutcome => outcome !== undefined);
     const report: BatchReport = {
@@ -79,12 +79,13 @@ export class BatchDownloader {
     destRoot: string,
     slots: Array<ItemOutcome | undefined>,
     state: PoolState,
+    groupByItem: boolean,
   ): Promise<void> {
     while (!state.aborted && state.next < items.length) {
       const index = state.next;
       state.next += 1;
       const item = items[index]!;
-      const target = { destRoot, baseName: plan.get(item.id)!, sectionFolder: folders.get(item.sectionNumber) };
+      const target = { destRoot, baseName: plan.get(item.id)!, sectionFolder: folders.get(item.sectionNumber), groupByItem };
       slots[index] = await this.attempt(item, target, state);
       state.done += 1;
       this.logger.progress({ done: state.done, total: items.length, label: item.name });

@@ -18,14 +18,15 @@ export class NamePlanner {
   }
 
   plan(items: readonly CourseItem[]): Map<string, string> {
-    const counts = new Map<string, number>();
+    const sections = new Map<number, Array<readonly [string, string]>>();
     const plan = new Map<string, string>();
     for (const item of items) {
-      const base = this.namer.baseName(item.name);
-      const key = `${item.sectionNumber}/${base.toLowerCase()}`;
-      const occurrence = (counts.get(key) ?? 0) + 1;
-      counts.set(key, occurrence);
-      plan.set(item.id, occurrence === 1 ? base : `${base} (${occurrence})`);
+      const section = sections.get(item.sectionNumber) ?? [];
+      section.push([item.id, item.name]);
+      sections.set(item.sectionNumber, section);
+    }
+    for (const section of sections.values()) {
+      for (const [id, name] of this.namer.directoryNames(section)) plan.set(id, name);
     }
     return plan;
   }
