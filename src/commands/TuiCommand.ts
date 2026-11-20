@@ -1,7 +1,7 @@
 import type { TuiApplication } from "../tui/TuiApplication.ts";
 import type { Command } from "./Command.ts";
 
-/** Orden por defecto en una terminal interactiva: abre el selector. */
+/** Opens the course selector on an interactive terminal. */
 export class TuiCommand implements Command {
   private readonly app: TuiApplication;
 
