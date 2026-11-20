@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
+import { setTimeout } from "node:timers/promises";
 import { CliApplication } from "../../src/CliApplication.ts";
+import { RawTerminal } from "../../src/tui/RawTerminal.ts";
 import type { KeyPress } from "../../src/tui/Terminal.ts";
 import { FakeMoodle } from "../support/FakeMoodle.ts";
 import type { FakeMoodleOptions } from "../support/FakeMoodle.ts";
@@ -74,19 +77,54 @@ describe("e2e · selector interactivo", () => {
     assert.deepEqual(await pdfs(work), ["Structuri de date/Tema/Tema 1.pdf"]);
   });
 
-  it("descarga una selección de cada curso bajo un único destino", async () => {
-    const { code, terminal, stdout, stderr } = await run(await server(), [
-      key("space"), key("down"), key("space"), key("enter"),
-      key("space"), key("enter"), key("space"), key("enter"), key("enter"), key("enter"),
-    ]);
-    assert.equal(code, 0, stderr);
+  it("con teclas de terminal, retrocede entre cursos sin perder marcas y muestra la despedida antes de salir", async () => {
+    const moodle = await server();
+    const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: (_mode: boolean) => undefined });
+    const stdout = new CapturedStream(true, 80);
+    const stderr = new CapturedStream();
+    const terminal = new RawTerminal({ input, output: stdout });
+    const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE }, stdout, stderr, cwd: work, terminal });
+    const finished = app.run(["--base-url", moodle.origin]);
+
+    async function screen(text: string, offset = 0) {
+      const deadline = Date.now() + 3000;
+      while (!stdout.output.includes(text, offset) && Date.now() < deadline) await setTimeout(5);
+      assert.ok(stdout.output.includes(text, offset), `La terminal no mostró «${text}»`);
+    }
+    async function type(bytes: string, expected: string) {
+      const offset = stdout.output.length;
+      input.write(bytes);
+      await screen(expected, offset);
+    }
+
+    try {
+      await screen("Tus cursos");
+      await type(" ", "Cursos marcados: 1");
+      await type("\x1b[B ", "Cursos marcados: 2");
+      await type(" ", "Cursos marcados: 1");
+      await type("A", "Cursos marcados: 2");
+      await type("A", "Cursos marcados: 0");
+      await type("A", "Cursos marcados: 2");
+      await type("\r", "Curso 1 de 2");
+      await type(" ", "[x] Programa");
+      await type("\r", "Curso 2 de 2");
+      await type(" ", "[x] Tema 1");
+      await type("\x1b", "Curso 1 de 2");
+      await type("\r", "[x] Tema 1");
+      await type("\r", "Confirmar la descarga de 2 contenidos");
+      await type("\r", "guardar los archivos");
+      await type("\r", "Mulțumesc!");
+      assert.equal(await finished, 0, stderr.output);
+    } finally {
+      input.destroy();
+    }
+
     assert.deepEqual(await pdfs(work), [
       "Algoritmi fundamentali/General/Programa.pdf",
       "Structuri de date/Tema/Tema 1.pdf",
     ]);
-    assert.match(terminal.allFrames(), /Confirmar la descarga de 2 contenidos[\s\S]*Algoritmi fundamentali[\s\S]*Structuri de date/);
-    assert.match(terminal.allFrames(), /Descargando 2\/2: Tema 1/);
-    assert.match(stdout, /2 archivos nuevos[\s\S]*Mulțumesc!/);
+    assert.match(stdout.output, /Descargando 2\/2: Tema 1/);
+    assert.match(stdout.output, /Mulțumesc![\s\S]*- -[\s\S]*Mulțumesc![\s\S]*___[\s\S]*Mulțumesc![\s\S]*\\_\/[\s\S]*\x1b\[\?1049l✓ Descarga completada: 2 archivos nuevos/);
   });
 
   it("puede elegir solo una semana con a y descargarla", async () => {

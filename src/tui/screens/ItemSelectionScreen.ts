@@ -20,12 +20,13 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
   private readonly layout: FrameLayout;
   private readonly messages: Messages;
   private readonly skipEmpty: boolean;
+  private readonly position: string | undefined;
   private readonly scroll = new ScrollWindow();
   private cursor = 0;
   private page = DEFAULT_PAGE;
   private notice: string | undefined;
 
-  constructor(deps: { title: string; weeks: readonly Week[]; marked: ReadonlySet<string>; layout: FrameLayout; messages: Messages; skipEmpty?: boolean }) {
+  constructor(deps: { title: string; weeks: readonly Week[]; marked: ReadonlySet<string>; layout: FrameLayout; messages: Messages; skipEmpty?: boolean; position?: string }) {
     this.title = deps.title;
     this.weeks = deps.weeks.filter((week) => week.items.length > 0);
     this.flat = this.weeks.flatMap((week) => week.items);
@@ -33,6 +34,11 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
     this.layout = deps.layout;
     this.messages = deps.messages;
     this.skipEmpty = deps.skipEmpty ?? false;
+    this.position = deps.position;
+  }
+
+  selection(): CourseItem[] {
+    return this.flat.filter((item) => this.marked.has(item.id));
   }
 
   render(size: TerminalSize): string[] {
@@ -40,7 +46,7 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
     const { tui, commands } = this.messages;
     if (this.flat.length === 0) {
       const footer = this.skipEmpty ? tui.keysEmptyCourse() : tui.keysList();
-      return this.layout.compose({ title: this.title, body: [tui.noItems()], footer, size });
+      return this.layout.compose({ title: this.title, subtitle: this.position, body: [tui.noItems()], footer, size });
     }
 
     const rows: Array<{ text: string; selected: boolean }> = [];
@@ -59,7 +65,8 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
 
     const { start, end } = this.scroll.window(cursorRow, rows.length, this.page);
     const body = rows.slice(start, end).map((row) => this.layout.row(row.text, size, row.selected));
-    const subtitle = this.notice ?? tui.selectedCount({ count: String(this.marked.size) });
+    const status = this.notice ?? tui.selectedCount({ count: String(this.marked.size) });
+    const subtitle = this.position === undefined ? status : `${this.position} · ${status}`;
     return this.layout.compose({ title: this.title, subtitle, body, footer: tui.keysItems(), size });
   }
 
@@ -107,7 +114,7 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
   }
 
   private confirm(): ScreenResult<CourseItem[]> {
-    const chosen = this.flat.filter((item) => this.marked.has(item.id));
+    const chosen = this.selection();
     if (chosen.length === 0) {
       this.notice = this.messages.tui.nothingMarked();
       return { kind: "stay" };

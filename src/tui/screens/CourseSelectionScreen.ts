@@ -8,11 +8,13 @@ export class CourseSelectionScreen implements Screen<readonly CourseSummary[]> {
   private readonly courses: readonly CourseSummary[];
   private readonly marked: Set<string>;
   private readonly list: ListScreen<CourseSummary>;
+  private readonly messages: Messages["tui"];
 
   constructor(deps: { courses: readonly CourseSummary[]; marked: Set<string>; layout: FrameLayout; messages: Messages }) {
     const { courses, marked, layout, messages: { tui } } = deps;
     this.courses = courses;
     this.marked = marked;
+    this.messages = tui;
     this.list = new ListScreen({
       title: tui.coursesTitle(),
       footer: tui.keysCourses(),
@@ -26,7 +28,7 @@ export class CourseSelectionScreen implements Screen<readonly CourseSummary[]> {
   }
 
   render(size: TerminalSize): string[] {
-    return this.list.render(size);
+    return this.list.render(size, this.messages.markedCourses({ count: String(this.marked.size) }));
   }
 
   press(key: KeyPress): ScreenResult<readonly CourseSummary[]> {

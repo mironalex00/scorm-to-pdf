@@ -24,14 +24,14 @@ import { CapturedStream } from "../support/streams.ts";
 const item = (id: string, name: string, sectionNumber: number, kind: "resource" | "scorm" = "resource"): CourseItem => ({ id, kind, name, url: "u", sectionNumber });
 const alfa: CourseContents = { sections: [{ number: 3, title: "Tres" }, { number: 1, title: "Uno" }], items: [item("a", "Tema A", 1), item("b", "Tema B", 1, "scorm"), item("c", "Tema C", 3)] };
 
-function make(keys: KeyPress[], options: { contents?: Record<string, CourseContents | Error>; report?: (items: readonly CourseItem[], logger: TuiLogger) => BatchReport | Promise<BatchReport>; courses?: Array<{ id: string; name: string }>; animate?: boolean } = {}) {
+function make(keys: KeyPress[], options: { contents?: Record<string, CourseContents | Error>; report?: (items: readonly CourseItem[], logger: TuiLogger) => BatchReport | Promise<BatchReport>; courses?: Array<{ id: string; name: string }> } = {}) {
   const platform = new FakePlatform();
   platform.courses = options.courses ?? [{ id: "2", name: "Beta" }, { id: "1", name: "Alfa" }];
   platform.contents = options.contents ?? { "1": alfa, "2": { sections: [], items: [] } };
   const catalog = new CatalogService({ platform, store: new CompressedStore({ redactor: new Redactor() }), locale: "es", tracer: new NullTracer() });
   const terminal = new ScriptedTerminal(keys);
   const logger = new TuiLogger();
-  const stdout = new CapturedStream(options.animate);
+  const stdout = new CapturedStream();
   const stderr = new CapturedStream();
   const calls: Array<{ items: string[]; dest: string }> = [];
   const batch = {
@@ -60,7 +60,7 @@ describe("TuiApplication · camino feliz", () => {
     ]);
     assert.equal(await app.run(), 0);
     assert.deepEqual(calls, [{ items: ["a", "b"], dest: "carpeta-actual/Alfa" }]);
-    assert.equal(stdout.output, "✓ Descarga completada: 2 archivos nuevos, 0 ya existían — carpeta-actual\nMulțumesc!\n:)\n");
+    assert.equal(stdout.output, "✓ Descarga completada: 2 archivos nuevos, 0 ya existían — carpeta-actual\n");
     assert.equal(stderr.output, "");
     assert.deepEqual([terminal.opened, terminal.closed, terminal.remainingKeys], [1, 1, 0]);
 
@@ -99,12 +99,13 @@ describe("TuiApplication · camino feliz", () => {
     assert.match(stdout.output, /0 archivos nuevos, 1 ya existían/);
   });
 
-  it("anima la sonrisa en la terminal después del agradecimiento", async () => {
-    const { app, terminal, stdout } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")], { animate: true });
+  it("dibuja tres cuadros de despedida al terminar", async () => {
+    const { app, terminal } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")]);
     assert.equal(await app.run(), 0);
     assert.equal(terminal.closed, 1);
-    const frames = stdout.output.split("Mulțumesc!\n")[1]!.split("\x1b[4A");
+    const frames = terminal.frames.slice(-3).map((lines) => lines.join("\n"));
     assert.equal(frames.length, 3);
+    assert.ok(frames.every((frame) => frame.startsWith("Mulțumesc!")));
     assert.match(frames[0]!, /- -/);
     assert.match(frames[2]!, /\\_\//);
   });
@@ -143,6 +144,18 @@ describe("TuiApplication · navegación", () => {
     assert.equal(await app.run(), 0);
     assert.deepEqual(calls[0]!.items, ["a", "b"]);
     assert.match(terminal.allFrames(), /\[x\] Tema A/);
+  });
+
+  it("Esc entre cursos conserva incluso las marcas aún sin confirmar", async () => {
+    const { app, terminal, calls } = make([
+      key("space"), key("down"), key("space"), key("enter"),
+      key("space"), key("enter"),
+      key("space"), key("escape"),
+      key("enter"), key("enter"), key("enter"), key("enter"),
+    ], { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("z", "Z", 1)] } } });
+    assert.equal(await app.run(), 0);
+    assert.match(terminal.allFrames(), /Curso 2 de 2/);
+    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Alfa" }, { items: ["z"], dest: "carpeta-actual/Beta" }]);
   });
 
   it("Esc en los contenidos vuelve a la lista de cursos y permite elegir otro", async () => {
