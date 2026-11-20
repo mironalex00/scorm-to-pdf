@@ -3,7 +3,7 @@ import type { CourseSummary } from "../domain/catalog.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { CatalogService } from "./CatalogService.ts";
 
-/** Traduce lo que escribe el usuario («algoritmi» o «101») en un curso concreto, o explica por qué no puede. */
+/** Resolves a course by ID or name and reports ambiguous matches. */
 export class CourseResolver {
   private readonly catalog: CatalogService;
   private readonly messages: Messages;

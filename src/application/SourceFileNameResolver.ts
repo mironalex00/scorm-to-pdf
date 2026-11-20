@@ -1,4 +1,4 @@
-/** Deduce el nombre original de un archivo descargado: Content-Disposition primero, la URL después. */
+/** Uses Content-Disposition first and falls back to the final URL. */
 export class SourceFileNameResolver {
   resolve(input: { url: URL; contentDisposition: string | undefined }): string {
     const fromHeader = this.fromHeader(input.contentDisposition);
