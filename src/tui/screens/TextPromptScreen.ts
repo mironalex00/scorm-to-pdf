@@ -3,7 +3,7 @@ import type { KeyPress, Screen, ScreenResult, TerminalSize } from "../Terminal.t
 
 const MAX_MASKED = 40;
 
-/** Entrada de una línea de texto; con `mask` oculta lo escrito (para la cookie) y solo muestra su longitud. */
+/** Reads a single line and masks the value for session cookies. */
 export class TextPromptScreen implements Screen<string> {
   private readonly title: string;
   private readonly lines: readonly string[];

@@ -1,11 +1,10 @@
 /**
- * Fixtures SINTÉTICOS con la estructura de Moodle 4.x según lo descrito por el dueño; no son
- * capturas reales. Cuando haya capturas reales (--trace), se añaden aquí junto a estas.
+ * Synthetic Moodle 4.x fixtures for parser and CLI tests.
  */
 export const BASE = "https://moodle.example.org/";
 export const SESSKEY = "Ab3dEf9ZqW";
 
-export function coursesPage(sesskey = SESSKEY, title = "Mis cursos"): string {
+export function coursesPage(sesskey = SESSKEY, title = "My courses"): string {
   return `<!DOCTYPE html><html><head><title>${title}</title><script>
 //<![CDATA[
 var M = {}; M.yui = {};
@@ -50,7 +49,7 @@ export const COURSE_INDEX = `<div id="courseindex-content">
 <div class="courseindex-section" data-for="section" data-id="14" data-number="x"><a data-for="section_title">Sin número</a></div>
 </div>`;
 
-/** Muestra sintética basada en el cuerpo del curso 28 de UTCN, sin índice lateral. */
+/** Synthetic UTCN course body without a sidebar index. */
 export const COURSE_BODY = `<div id="region-main"><ul>
   <li id="section-1" data-for="section" data-number="1" data-id="404" data-sectionname="Săptămâna 1">
     <ul><li class="activity modtype_subsection" data-for="cmitem">

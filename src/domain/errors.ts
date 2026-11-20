@@ -1,7 +1,4 @@
-/**
- * Jerarquía de errores esperados. Cada uno lleva el código de salida del proceso,
- * así la capa de arranque no necesita conocer los tipos concretos.
- */
+/** An expected failure with a CLI exit status. */
 export abstract class AppError extends Error {
   abstract readonly exitCode: number;
 
@@ -11,27 +8,27 @@ export abstract class AppError extends Error {
   }
 }
 
-/** Argumentos de línea de comandos o entorno inválidos. */
+/** Invalid arguments or environment settings. */
 export class UsageError extends AppError {
   readonly exitCode = 2;
 }
 
-/** Moodle no reconoce la sesión (cookie caducada, incorrecta o ausente). */
+/** Moodle rejected the session. */
 export class AuthenticationError extends AppError {
   readonly exitCode = 3;
 }
 
-/** El recurso pedido no existe en el servidor. */
+/** The requested resource does not exist. */
 export class NotFoundError extends AppError {
   readonly exitCode = 1;
 }
 
-/** El paquete SCORM no tiene la estructura esperada. */
+/** The SCORM package has an unsupported structure. */
 export class ScormFormatError extends AppError {
   readonly exitCode = 1;
 }
 
-/** Fallo de red, de HTTP o de validación de un recurso descargado. */
+/** A request or response validation failed. */
 export class DownloadError extends AppError {
   readonly exitCode = 1;
   readonly retryable: boolean;
@@ -42,17 +39,17 @@ export class DownloadError extends AppError {
   }
 }
 
-/** La plataforma respondió con una forma inesperada o rechazó la operación. */
+/** The platform rejected the request or returned an unexpected response. */
 export class PlatformError extends AppError {
   readonly exitCode = 1;
 }
 
-/** No se pudo escribir el PDF en disco. */
+/** The destination could not be written. */
 export class OutputError extends AppError {
   readonly exitCode = 1;
 }
 
-/** Texto de cualquier valor lanzado: `throw "x"` o `throw 42` también son válidos en JavaScript. */
+/** Returns an error message even when the thrown value is not an Error. */
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

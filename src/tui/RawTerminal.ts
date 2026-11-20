@@ -4,6 +4,7 @@ import type { KeyName, KeyPress, Terminal, TerminalSize } from "./Terminal.ts";
 const ENTER_SCREEN = "\x1b[?1049h\x1b[?25l";
 const LEAVE_SCREEN = "\x1b[?25h\x1b[?1049l";
 const DEFAULT_SIZE: TerminalSize = { columns: 80, rows: 24 };
+const MAX_PENDING_KEYS = 16_384;
 
 interface KeypressInfo {
   readonly name?: string;
@@ -33,29 +34,32 @@ const NAMED_KEYS: Readonly<Record<string, KeyName>> = {
   backspace: "backspace", tab: "tab", pageup: "pageup", pagedown: "pagedown", home: "home", end: "end",
 };
 
-/** Teclado y pantalla reales: stdin en modo raw y stdout en pantalla alternativa, con códigos ANSI estándar. */
+/** Reads raw terminal input and renders to the alternate screen. */
 export class RawTerminal implements Terminal {
   private readonly input: TerminalInput;
   private readonly output: TerminalOutput;
+  private readonly interrupt: (() => boolean) | undefined;
   private readonly queue: KeyPress[] = [];
   private waiter: ((key: KeyPress) => void) | undefined;
   private opened = false;
 
   private readonly onKeypress: KeypressListener = (str, info) => {
     for (const key of this.decode(str, info)) {
+      if (key.name === "ctrl-c" && this.interrupt?.()) continue;
       const waiting = this.waiter;
       if (waiting) {
         this.waiter = undefined;
         waiting(key);
-      } else {
+      } else if (this.queue.length < MAX_PENDING_KEYS) {
         this.queue.push(key);
       }
     }
   };
 
-  constructor(deps: { input: TerminalInput; output: TerminalOutput }) {
+  constructor(deps: { input: TerminalInput; output: TerminalOutput; interrupt?: () => boolean }) {
     this.input = deps.input;
     this.output = deps.output;
+    this.interrupt = deps.interrupt;
   }
 
   get interactive(): boolean {
@@ -80,6 +84,9 @@ export class RawTerminal implements Terminal {
     if (!this.opened) return;
     this.opened = false;
     this.input.off("keypress", this.onKeypress);
+    this.queue.length = 0;
+    this.waiter?.({ name: "ctrl-c" });
+    this.waiter = undefined;
     this.input.setRawMode!(false);
     this.input.pause();
     this.output.write(LEAVE_SCREEN);
@@ -89,19 +96,27 @@ export class RawTerminal implements Terminal {
     this.output.write(`\x1b[H${lines.map((line) => `${line}\x1b[K`).join("\r\n")}\x1b[J`);
   }
 
-  readKey(): Promise<KeyPress> {
+  async readKey(signal?: AbortSignal): Promise<KeyPress> {
+    signal?.throwIfAborted();
     const next = this.queue.shift();
-    if (next) return Promise.resolve(next);
-    return new Promise((resolve) => {
-      this.waiter = resolve;
+    if (next) return next;
+    return new Promise((resolve, reject) => {
+      const abort = () => {
+        this.waiter = undefined;
+        reject(signal?.reason);
+      };
+      this.waiter = (key) => {
+        signal?.removeEventListener("abort", abort);
+        resolve(key);
+      };
+      signal?.addEventListener("abort", abort, { once: true });
     });
   }
 
-  /** Traduce un evento de readline a nuestras teclas; ignora teclas de función y combinaciones con Ctrl/Alt. */
+  /** Maps readline events to keys understood by the interactive screens. */
   private decode(str: string | undefined, info: KeypressInfo | undefined): KeyPress[] {
     if (info?.ctrl && info.name === "c") return [{ name: "ctrl-c" }];
-    // Un Esc suelto llega de readline con meta: true (se emite por su temporizador de secuencias),
-    // así que debe reconocerse antes de descartar las combinaciones con Alt.
+    // Readline sets meta on a standalone Escape when its escape-sequence timer expires.
     if (info?.name === "escape") return [{ name: "escape" }];
     if (info?.ctrl || info?.meta) return [];
     if (info?.name === "space") return [{ name: "space", char: " " }];

@@ -5,7 +5,7 @@ export interface CourseSummary {
   readonly name: string;
 }
 
-/** Sección del curso tal como la nombra la plataforma; `number` es su índice, sin casos especiales. */
+/** A section title and its numeric index in the course. */
 export interface Section {
   readonly number: number;
   readonly title: string;
@@ -24,7 +24,7 @@ export interface CourseContents {
   readonly items: readonly CourseItem[];
 }
 
-/** Lo que devuelve una plataforma al resolver un ítem: un archivo en crudo o un SCORM de diapositivas. */
+/** A direct file or the entry document for a SCORM slide deck. */
 export type FetchedItem =
   | { readonly kind: "file"; readonly bytes: Uint8Array; readonly fileName: string; readonly contentType: string }
   | { readonly kind: "slides"; readonly entryUrl: URL; readonly html: string };

@@ -16,11 +16,7 @@ export interface LocatedScorm {
   readonly revision: number;
 }
 
-/**
- * Traduce el ID del módulo SCORM en la URL de su documento de entrada.
- * El número de revisión de la URL suele ser un simple «cache-buster»; si el servidor
- * lo ignora, la revisión 1 acierta a la primera. Si no, se sondea por tandas.
- */
+/** Probes content revisions in batches when the entry URL does not specify one. */
 export class ScormLocator {
   private readonly session: MoodleSession;
   private readonly logger: Logger;

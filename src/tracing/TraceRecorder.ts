@@ -2,6 +2,7 @@ import type { Redactor } from "./Redactor.ts";
 import type { SerializedError, TraceEvent, TraceLevel, TraceSink, Tracer } from "./Tracer.ts";
 
 const MAX_SNAPSHOT_CHARS = 200_000;
+const MAX_SNAPSHOTS = 50;
 const MAX_CAUSE_DEPTH = 8;
 
 interface RecorderState {
@@ -15,6 +16,7 @@ interface RecorderState {
   readonly ring: string[];
   seq: number;
   errors: number;
+  snapshots: number;
 }
 
 export interface TraceRecorderOptions {
@@ -22,7 +24,7 @@ export interface TraceRecorderOptions {
   readonly clock: () => number;
   readonly redactor: Redactor;
   readonly sink: TraceSink;
-  /** Escribe cada evento al momento (--trace); si no, se guardan en un anillo y se vuelcan al fallar. */
+  /** Writes events immediately or keeps recent events for an explicit flush. */
   readonly streaming: boolean;
   readonly captureBodies: boolean;
   readonly ringSize: number;
@@ -38,7 +40,7 @@ export class TraceRecorder implements Tracer {
   }
 
   static create(options: TraceRecorderOptions): TraceRecorder {
-    return new TraceRecorder({ ...options, ring: [], seq: 0, errors: 0 }, {});
+    return new TraceRecorder({ ...options, ring: [], seq: 0, errors: 0, snapshots: 0 }, {});
   }
 
   event(level: TraceLevel, scope: string, name: string, data?: Record<string, unknown>): void {
@@ -65,10 +67,11 @@ export class TraceRecorder implements Tracer {
   }
 
   snapshot(label: string, content: string, meta?: Record<string, unknown>): void {
-    if (!this.state.captureBodies) return;
+    if (!this.state.captureBodies || this.state.snapshots >= MAX_SNAPSHOTS) return;
+    this.state.snapshots += 1;
     const redacted = this.state.redactor.redact(content);
     const stored = redacted.length > MAX_SNAPSHOT_CHARS ? `${redacted.slice(0, MAX_SNAPSHOT_CHARS)}\n[...truncated]` : redacted;
-    this.guard(() => this.state.sink.snapshot(label, stored));
+    if (!this.guard(() => this.state.sink.snapshot(label, stored) !== false)) return;
     this.emit({ level: "info", scope: "trace", name: "snapshot.saved", data: { label, chars: content.length, ...meta } });
   }
 
@@ -84,7 +87,7 @@ export class TraceRecorder implements Tracer {
     return this.state.errors > 0;
   }
 
-  flush(): string {
+  flush(): string | undefined {
     if (!this.state.streaming) {
       for (const line of this.state.ring) this.guard(() => this.state.sink.write(line));
       this.state.ring.length = 0;
@@ -145,11 +148,11 @@ export class TraceRecorder implements Tracer {
     return redactor.redactValue({ name: error.name, message: error.message, chain, stack: error.stack }) as SerializedError;
   }
 
-  private guard(action: () => void): void {
+  private guard<T>(action: () => T): T | undefined {
     try {
-      action();
+      return action();
     } catch {
-      // La traza es best-effort: un disco lleno no debe tumbar la descarga.
+      return undefined;
     }
   }
 }

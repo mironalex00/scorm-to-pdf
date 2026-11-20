@@ -1,5 +1,6 @@
 import type { CatalogService } from "../application/CatalogService.ts";
 import type { Logger } from "../application/ports.ts";
+import { jsonOutput, plainLine } from "../infra/plainText.ts";
 import type { Command } from "./Command.ts";
 
 export class CoursesCommand implements Command {
@@ -16,9 +17,9 @@ export class CoursesCommand implements Command {
   async run(): Promise<number> {
     const courses = await this.catalog.courses();
     if (this.json) {
-      this.logger.result(JSON.stringify(courses, null, 2));
+      this.logger.result(jsonOutput(courses));
     } else {
-      for (const course of courses) this.logger.result(`${course.id}\t${course.name}`);
+      for (const course of courses) this.logger.result(`${course.id}\t${plainLine(course.name)}`);
     }
     return 0;
   }

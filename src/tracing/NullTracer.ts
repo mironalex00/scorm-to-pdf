@@ -1,7 +1,13 @@
+import type { Redactor } from "./Redactor.ts";
 import type { Tracer, TraceLevel } from "./Tracer.ts";
 
-/** Trazador que no registra nada: es lo que usan los componentes cuando no se pide traza. */
 export class NullTracer implements Tracer {
+  private readonly redactor: Redactor | undefined;
+
+  constructor(redactor?: Redactor) {
+    this.redactor = redactor;
+  }
+
   event(_level: TraceLevel, _scope: string, _name: string, _data?: Record<string, unknown>): void {}
 
   span<T>(_scope: string, _name: string, _data: Record<string, unknown>, work: () => Promise<T>): Promise<T> {
@@ -14,7 +20,9 @@ export class NullTracer implements Tracer {
     return this;
   }
 
-  addSecret(_value: string): void {}
+  addSecret(value: string): void {
+    this.redactor?.addSecret(value);
+  }
 
   hasErrors(): boolean {
     return false;

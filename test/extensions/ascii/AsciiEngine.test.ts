@@ -5,7 +5,7 @@ import { fitAsciiFrame } from "../../../src/extensions/ascii/viewport.ts";
 
 const rgb = (value: number) => Buffer.alloc(CELL_WIDTH * CELL_HEIGHT * 3, value);
 
-test("mantiene la forma del glifo al convertir su propio raster", () => {
+test("preserves the glyph shape after a raster round trip", () => {
   const engine = new AsciiEngine({ chars: " /\\", tone: 0 });
   const grid = engine.frame(rgb(0), 1, 1);
   grid.gi[0] = 1;
@@ -15,7 +15,7 @@ test("mantiene la forma del glifo al convertir su propio raster", () => {
   assert.equal(engine.ansi(grid), "/");
 });
 
-test("renderiza color de primer plano y fondo y escapa glifos en HTML", () => {
+test("renders foreground and background colors and escapes HTML glyphs", () => {
   const engine = new AsciiEngine({ bg: true, chars: "<&" });
   const grid = engine.frame(rgb(120), 1, 1);
   assert.equal(engine.text(grid), "<");
@@ -25,19 +25,31 @@ test("renderiza color de primer plano y fondo y escapa glifos en HTML", () => {
   assert.deepEqual(engine.raster(grid, 1).buf, rgb(120));
 });
 
-test("valida dimensiones, cuadros RGB y parámetros de conversión", () => {
+test("renders dark colored ink on light paper when inversion is enabled", () => {
+  const engine = new AsciiEngine({ color: true, invert: true, chars: " #" });
+  const dark = engine.frame(rgb(0), 1, 1);
+  const light = engine.frame(rgb(255), 1, 1);
+  assert.equal(engine.text(dark), "#");
+  assert.equal(engine.text(light), " ");
+  assert.match(engine.ansi(dark), /\x1b\[38;2;0;0;0;48;2;255;255;255m#/);
+  assert.match(engine.html([dark]), /background:#fff.*<span style="color:#000000">#/);
+  assert.deepEqual(new Set(engine.raster(dark, 1).buf), new Set([0, 255]));
+  assert.deepEqual(engine.raster(light, 1).buf, rgb(255));
+});
+
+test("validates dimensions, RGB frames, and conversion settings", () => {
   assert.throws(() => new AsciiEngine({ gamma: Infinity }), /Gamma/);
-  assert.throws(() => new AsciiEngine({ chars: "ñ" }), /ASCII imprimibles/);
+  assert.throws(() => new AsciiEngine({ chars: "ñ" }), /printable ASCII/);
   const engine = new AsciiEngine({ invert: true });
   assert.deepEqual(engine.size(100, 50, 40, 0.5), { cols: 40, rows: 10, w: 240, h: 80 });
-  assert.throws(() => engine.size(0, 1, 5, 0.5), /Dimensiones/);
-  assert.throws(() => engine.size(1, 100, 500, 1), /demasiado grande/);
+  assert.throws(() => engine.size(0, 1, 5, 0.5), /Invalid dimensions/);
+  assert.throws(() => engine.size(1, 100, 500, 1), /too large/);
   assert.throws(() => engine.frame(rgb(0), 2, 1), /RGB24/);
-  assert.throws(() => engine.raster(engine.frame(rgb(0), 1, 1), 1.5), /entero/);
+  assert.throws(() => engine.raster(engine.frame(rgb(0), 1, 1), 1.5), /an integer/);
   assert.match(engine.html([engine.frame(rgb(255), 1, 1)]), /background:#fff/);
 });
 
-test("centra y recorta cuadros ASCII al tamaño de un visor", () => {
+test("centers and crops ASCII frames to the viewport", () => {
   assert.deepEqual(fitAsciiFrame(["abc"], 7, 5), ["", "", "  abc"]);
   assert.deepEqual(fitAsciiFrame(["012345", "abcdef", "ABCDEF", "678901"], 4, 2), ["bcde", "BCDE"]);
 });

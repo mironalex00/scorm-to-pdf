@@ -16,30 +16,30 @@ const exec = promisify(execFile);
 const main = join(asciiProject, "src/main.ts");
 const legacy = join(asciiProject, "src/extensions/ascii/main.ts");
 
-test("la ayuda y los errores ASCII pasan por la entrada general", async (t) => {
+test("routes ASCII help and usage errors through the main CLI", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "ascii-cli-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
-  const env = { ...process.env, PATH: "", MOODLE_COOKIE: "", MOODLE_BASE_URL: "mal-formada", SCORM_PLATFORM: "desconocida" };
+  const env = { ...process.env, PATH: "", MOODLE_COOKIE: "", MOODLE_BASE_URL: "invalid-url", SCORM_PLATFORM: "unknown" };
   const active = await exec(process.execPath, [main, "ascii", "--help"], { cwd, env });
   const compatible = await exec(process.execPath, [legacy, "--help"], { cwd, env });
   assert.equal(compatible.stdout, active.stdout);
-  assert.match(active.stdout, /ascii <entrada>.*--prepare/s);
+  assert.match(active.stdout, /ascii <input>.*--prepare/s);
   await assert.rejects(exec(process.execPath, [main, "ascii", "-w", "abc", "media.png"], { cwd, env }),
     (error: unknown) => {
       const failure = error as { code: number; stderr: string };
-      return failure.code === 2 && failure.stderr.includes("--cols debe ser un entero");
+      return failure.code === 2 && failure.stderr.includes("--cols must be an integer");
     });
   assert.deepEqual(await readdir(cwd), []);
 });
 
-test("ascii usa el par portátil desde otro directorio, con PATH vacío y sin residuos ejecutables", asciiIntegration, async (t) => {
+test("runs the portable codecs from another directory with an empty PATH and removes the executables", asciiIntegration, async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "ascii-cli-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const temporary = join(cwd, "tmp");
   await mkdir(temporary);
   const env = {
     ...process.env, PATH: "", TMPDIR: temporary, SCORM_ASCII_CACHE: asciiCache, SCORM_TRACE: "0",
-    MOODLE_COOKIE: "", MOODLE_BASE_URL: "mal-formada", SCORM_PLATFORM: "desconocida",
+    MOODLE_COOKIE: "", MOODLE_BASE_URL: "invalid-url", SCORM_PLATFORM: "unknown",
     FFMPEG: "/bad/ffmpeg", FFPROBE: "/bad/ffprobe",
   };
   const png = asciiAsset("bear_hoop.png");
@@ -58,7 +58,7 @@ test("ascii usa el par portátil desde otro directorio, con PATH vacío y sin re
   assert.deepEqual(await readdir(temporary), []);
 });
 
-test("SIGTERM en una exportación elimina los temporales y conserva el destino previo", {
+test("removes temporary files and preserves the previous output on SIGTERM", {
   ...asciiIntegration, timeout: 15_000,
 }, async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "ascii-cli-test-"));
@@ -78,7 +78,7 @@ test("SIGTERM en una exportación elimina los temporales y conserva el destino p
   const deadline = Date.now() + 10_000;
   try {
     while (!(await readdir(cwd)).some((name) => name.startsWith(".ascii-"))) {
-      assert.ok(child.exitCode === null && Date.now() < deadline, "no se inició la escritura temporal");
+      assert.ok(child.exitCode === null && Date.now() < deadline, "The temporary output was not created");
       await setTimeout(15);
     }
     assert.ok((await readdir(temporary)).some((name) => name.startsWith("scorm-ascii-")));
@@ -93,26 +93,28 @@ test("SIGTERM en una exportación elimina los temporales y conserva el destino p
   }
 });
 
-test("un paquete no verificado no se guarda y el CLI devuelve error sin resolver Moodle", { skip: !asciiSupported }, async (t) => {
+test("rejects an unverified codec archive without writing a cache or an automatic trace", { skip: !asciiSupported }, async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "ascii-cli-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const stdout = new CapturedStream();
   const stderr = new CapturedStream();
   const app = new CliApplication({
-    env: { MOODLE_BASE_URL: "mal-formada" }, cwd, stdout, stderr, http: {
+    env: { MOODLE_BASE_URL: "invalid-url" }, cwd, stdout, stderr, http: {
       async get() {
-        return { status: 200, body: Buffer.from("ZIP inválido"), location: undefined, contentType: "", contentDisposition: undefined };
+        return { status: 200, body: Buffer.from("invalid ZIP"), location: undefined, contentType: "", contentDisposition: undefined };
       },
     },
   });
-  // Aísla el destino de los binarios del informe de diagnóstico que escribe el CLI.
-  const code = await app.run(["ascii", "--prepare", "--trace-dir", join(cwd, "trace")]);
+  const code = await app.run(["ascii", "--prepare"]);
   assert.equal(code, 1);
-  assert.match(stderr.output, /archivo comprimido de ffmpeg.*compilación verificada/);
+  assert.match(stderr.output, /tool archive for ffmpeg.*verified build/);
+  assert.deepEqual(await readdir(cwd), []);
+
+  assert.equal(await app.run(["ascii", "--prepare", "--trace-dir", join(cwd, "trace")]), 1);
   assert.deepEqual(await readdir(cwd), ["trace"]);
 });
 
-test("cancelar la preparación corta la petición y devuelve 130", { skip: !asciiSupported }, async (t) => {
+test("aborts the codec download and returns 130 when interrupted", { skip: !asciiSupported }, async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "ascii-cli-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
   const interruptions = new CliInterruptions();

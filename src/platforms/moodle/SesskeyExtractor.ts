@@ -6,7 +6,7 @@ const PATTERNS: readonly RegExp[] = [
   /sesskey=([A-Za-z0-9]+)/,
 ];
 
-/** Localiza la clave de sesión de Moodle en una página: M.cfg, un input oculto o un enlace de logout. */
+/** Extracts the session key from Moodle configuration, a hidden input, or the logout link. */
 export class SesskeyExtractor {
   extract(html: string): Secret | undefined {
     for (const pattern of PATTERNS) {

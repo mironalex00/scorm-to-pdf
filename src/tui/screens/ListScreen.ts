@@ -9,7 +9,7 @@ export interface ListItem<T> {
 
 const DEFAULT_PAGE = 5;
 
-/** Elección de un elemento entre varios, con desplazamiento. */
+/** Scrollable single-choice list. */
 export class ListScreen<T> implements Screen<T> {
   private readonly title: string;
   private readonly subtitle: string;

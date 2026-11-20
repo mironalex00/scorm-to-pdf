@@ -10,7 +10,7 @@ export interface FakeMoodleOptions {
   readonly title: string;
   readonly slideCount: number;
   readonly validCookie: string;
-  /** Ids de recursos cuya vista responde 404, para probar fallos parciales. */
+  /** Resource IDs that return 404 when opened. */
   readonly failItems?: readonly string[];
 }
 
@@ -22,7 +22,7 @@ const COURSES = [
   { id: 102, fullname: "Algoritmi fundamentali" },
 ];
 
-/** Respuestas de curso con enlaces relativos, con índice lateral o con cuerpo. */
+/** Course fixtures covering relative links, the sidebar index, and the course body. */
 const INDEXES: Readonly<Record<string, string>> = {
   "102": `<div id="courseindex-content">
 <div class="courseindex-section" data-for="section" data-number="0"><a class="courseindex-link courseindex-section-title" data-for="section_title">General</a>
@@ -49,11 +49,7 @@ const INDEXES: Readonly<Record<string, string>> = {
 
 const REDIRECTING_RESOURCES: Readonly<Record<string, string>> = { "501": "Programa.pdf", "531": "Complementar.pdf", "601": "Tema1.pdf" };
 
-/**
- * Moodle de pega con la cadena completa: exige cookie, redirige a /login/ sin ella, lista cursos
- * (my/courses.php + service.php), sirve el índice de cada curso, resuelve recursos y SCORM, y sirve
- * el contenido de un SCORM de diapositivas con una sola revisión.
- */
+/** Simulates authenticated Moodle course listings, activities, and a SCORM slide deck. */
 export class FakeMoodle {
   static start(options: FakeMoodleOptions): Promise<LocalServer> {
     return LocalServer.start((request, response) => FakeMoodle.handle(options, request, response));
@@ -131,7 +127,7 @@ export class FakeMoodle {
     if (file === "index.html") {
       const slides = Array.from({ length: options.slideCount }, (_, index) => ({
         src: `slides/slide-${String(index + 1).padStart(2, "0")}.jpg`,
-        title: `Diapositiva ${index + 1}`,
+        title: `Slide ${index + 1}`,
       }));
       return FakeMoodle.html(response, buildDeckHtml({ title: options.title, slides }));
     }

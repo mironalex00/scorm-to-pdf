@@ -3,7 +3,9 @@ import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import { after, before, test } from "node:test";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { openAsciiMedia, renderAsciiClip, run } from "../../../src/extensions/ascii/index.ts";
@@ -24,7 +26,44 @@ before(async () => {
 });
 after(() => lease?.close());
 
-test("convierte los PNG y GIF suministrados y devuelve una rejilla de texto reutilizable", mediaTest, async () => {
+test("fits a media iterator to the requested rows and releases both leases", mediaTest, async () => {
+  let leases = 0;
+  const runtime = {
+    async acquire() {
+      leases += 1;
+      return { tools: lease.tools, close: async () => { leases -= 1; } };
+    },
+  };
+  const media = await openAsciiMedia(asset("wink_cat.gif"), { cols: 40, maxRows: 5 }, { runtime });
+  assert.ok(media.rows <= 5);
+  assert.equal(leases, 0);
+  for await (const frame of media.frames()) {
+    assert.equal(frame.rows, media.rows);
+    assert.equal(leases, 1);
+    break;
+  }
+  assert.equal(leases, 0);
+});
+
+test("waits for terminal backpressure and restores the screen after playback", mediaTest, async () => {
+  let drains = 0;
+  const chunks: string[] = [];
+  const stream = Object.assign(new Writable({
+    highWaterMark: 1,
+    write(chunk: Buffer, _encoding, callback) {
+      chunks.push(chunk.toString());
+      void setTimeout(2).then(() => callback());
+    },
+  }), { isTTY: true, columns: 20, rows: 10 });
+  stream.on("drain", () => { drains += 1; });
+  await run(asset("wink_cat.gif"), { cols: 20, fps: 60, loop: true, maxFrames: 2 }, { ...context, stdout: stream });
+  assert.ok(drains >= 2);
+  assert.equal(chunks.filter((chunk) => chunk.startsWith("\x1b[H")).length, 2);
+  assert.equal(chunks.at(-1), "\x1b[0m\x1b[?25h\x1b[?1049l");
+  stream.end();
+});
+
+test("converts the supplied PNG and GIF files into reusable text frames", mediaTest, async () => {
   for (const name of ["bear_hoop.png", "hammer_point.png", "startled_boy.png"]) {
     const clip = await renderAsciiClip(asset(name), { cols: 24, invert: true }, context);
     assert.equal(clip.frames.length, 1, name);
@@ -40,7 +79,7 @@ test("convierte los PNG y GIF suministrados y devuelve una rejilla de texto reut
   }
 });
 
-test("lee JPG, JPEG y WebP y exporta texto, ANSI, HTML, JSON, PNG, GIF y vídeo", mediaTest, async (t) => {
+test("reads JPG, JPEG, and WebP and writes text, ANSI, HTML, JSON, images, and video", mediaTest, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "ascii-formats-"));
   t.after(() => rm(work, { recursive: true, force: true }));
   const target = (filename: string) => join(work, filename);
@@ -74,7 +113,7 @@ test("lee JPG, JPEG y WebP y exporta texto, ANSI, HTML, JSON, PNG, GIF y vídeo"
   }
 });
 
-test("una pista de audio corta no recorta el vídeo y --mute la omite", mediaTest, async (t) => {
+test("keeps the original video length when audio is shorter and omits audio with --mute", mediaTest, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "ascii-audio-"));
   t.after(() => rm(work, { recursive: true, force: true }));
   const input = join(work, "in.mp4");
@@ -92,7 +131,7 @@ test("una pista de audio corta no recorta el vídeo y --mute la omite", mediaTes
   }
 });
 
-test("un GIF de un cuadro conserva su duración al cambiar los fps", mediaTest, async (t) => {
+test("preserves the duration of a single-frame GIF when changing the frame rate", mediaTest, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "ascii-gif-duration-"));
   t.after(() => rm(work, { recursive: true, force: true }));
   const input = join(work, "one.gif");
@@ -104,7 +143,7 @@ test("un GIF de un cuadro conserva su duración al cambiar los fps", mediaTest, 
   assert.equal(clip.frames.length, 12);
 });
 
-test("rechaza una entrada inválida y conserva el destino existente", mediaTest, async (t) => {
+test("rejects invalid input and preserves an existing output file", mediaTest, async (t) => {
   const work = await mkdtemp(join(tmpdir(), "ascii-invalid-"));
   t.after(() => rm(work, { recursive: true, force: true }));
   const invalid = join(work, "invalid.png");
@@ -113,7 +152,43 @@ test("rechaza una entrada inválida y conserva el destino existente", mediaTest,
   await writeFile(dest, "previous");
   await assert.rejects(run(invalid, { out: dest }, context));
   assert.equal(await readFile(dest, "utf8"), "previous");
-  await assert.rejects(run(asset("bear_hoop.png"), { out: asset("bear_hoop.png") }, context), /mismo archivo/);
-  await assert.rejects(run(asset("bear_hoop.png"), { out: join(work, "out.zip") }, context), /Formato de salida/);
+  await assert.rejects(run(asset("bear_hoop.png"), { out: asset("bear_hoop.png") }, context), /different files/);
+  await assert.rejects(run(asset("bear_hoop.png"), { out: join(work, "out.zip") }, context), /Unsupported output format/);
   await assert.rejects(openAsciiMedia(asset("bear_hoop.png"), { signal: AbortSignal.abort() }, context), { name: "AbortError" });
+});
+
+test("passes only the network environment needed by the codec", { skip: process.platform === "win32" }, async (t) => {
+  const work = await mkdtemp(join(tmpdir(), "ascii-env-"));
+  t.after(() => rm(work, { recursive: true, force: true }));
+  const codec = join(work, "probe.sh");
+  const proxy = "http://proxy.example.test:8080";
+  const remote = "https://media.example.test/fixture.mp4";
+  const metadata = JSON.stringify({ streams: [{ codec_type: "video", width: 1, height: 1 }] });
+  await writeFile(codec, [
+    "#!/bin/sh",
+    '[ "${MOODLE_COOKIE+x}" != x ] && [ "${SCORM_CODEC_TEST_SENTINEL+x}" != x ] || exit 15',
+    'case "$*" in',
+    `  *${remote}*) [ "$https_proxy" = "${proxy}" ] || exit 16 ;;`,
+    '  *) [ "${https_proxy+x}" != x ] || exit 17 ;;',
+    "esac",
+    `printf '%s\\n' '${metadata}'`,
+    "",
+  ].join("\n"), { mode: 0o700 });
+
+  const settings = { MOODLE_COOKIE: "synthetic-cookie", SCORM_CODEC_TEST_SENTINEL: "synthetic-value", https_proxy: proxy };
+  const previous = Object.keys(settings).map((key) => [key, process.env[key]] as const);
+  const tools = { ffmpeg: codec, ffprobe: codec };
+  try {
+    Object.assign(process.env, settings);
+    for (const input of [join(work, "fixture.png"), remote]) {
+      const info = await probe(tools, input);
+      assert.equal(info.width, 1);
+      assert.equal(info.height, 1);
+    }
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

@@ -11,12 +11,12 @@ export const asciiSupported = (process.platform === "darwin" || process.platform
 export const asciiIntegration = {
   skip: process.env.SCORM_ASCII_TEST === "1" || ["ffmpeg", "ffprobe"].every((tool) => existsSync(join(build, tool + ".zip")))
     ? false
-    : "Ejecuta npm run ascii:prepare para habilitar la prueba de códecs.",
+    : "Run npm run ascii:prepare to enable codec tests.",
 };
 
 export const offline = {
   async get(): Promise<never> {
-    throw new Error("La prueba ASCII requiere el paquete preparado, sin peticiones de red.");
+    throw new Error("ASCII tests require the codec archives to be prepared locally.");
   },
 };
 

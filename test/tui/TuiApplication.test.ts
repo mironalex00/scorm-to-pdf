@@ -9,7 +9,7 @@ import { AuthenticationError, DownloadError } from "../../src/domain/errors.ts";
 import type { CourseContents, CourseItem } from "../../src/domain/catalog.ts";
 import { asciiAnimations } from "../../src/extensions/ascii/generatedAnimations.ts";
 import { fitAsciiFrame } from "../../src/extensions/ascii/viewport.ts";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import { CompressedStore } from "../../src/store/CompressedStore.ts";
 import { NullTracer } from "../../src/tracing/NullTracer.ts";
 import { Redactor } from "../../src/tracing/Redactor.ts";
@@ -30,7 +30,7 @@ function make(keys: KeyPress[], options: { contents?: Record<string, CourseConte
   const platform = new FakePlatform();
   platform.courses = options.courses ?? [{ id: "2", name: "Beta" }, { id: "1", name: "Alfa" }];
   platform.contents = options.contents ?? { "1": alfa, "2": { sections: [], items: [] } };
-  const catalog = new CatalogService({ platform, store: new CompressedStore({ redactor: new Redactor() }), locale: "es", tracer: new NullTracer() });
+  const catalog = new CatalogService({ platform, store: new CompressedStore({ redactor: new Redactor() }), locale: "en", tracer: new NullTracer() });
   const terminal = new ScriptedTerminal(keys);
   const logger = new TuiLogger();
   const stdout = new CapturedStream();
@@ -43,9 +43,9 @@ function make(keys: KeyPress[], options: { contents?: Record<string, CourseConte
     },
   };
   const app = new TuiApplication({
-    terminal, catalog, batch, logger, messages: es, stdout, stderr, cwd: "carpeta-actual",
+    terminal, catalog, batch, logger, messages: en, stdout, stderr, cwd: "carpeta-actual",
     namer: new FileNamer({ fallbackName: "archivo", maxNameBytes: 100 }),
-    printer: new ReportPrinter({ logger: new MemoryLogger(), messages: es }),
+    printer: new ReportPrinter({ logger: new MemoryLogger(), messages: en }),
     layout: new FrameLayout({ colors: false }),
   });
   return { app, terminal, stdout, stderr, calls, platform };
@@ -53,30 +53,30 @@ function make(keys: KeyPress[], options: { contents?: Record<string, CourseConte
 const outcomes = (items: readonly CourseItem[]): ItemOutcome[] => items.map((it) => ({ item: it, status: "downloaded", path: `p/${it.id}`, bytes: 1 }));
 const ok = (items: readonly CourseItem[]): BatchReport => ({ outcomes: outcomes(items), downloaded: items.length, skipped: 0, failed: 0, aborted: false });
 
-describe("TuiApplication · camino feliz", () => {
-  it("curso → contenidos por semana → confirmación → destino actual → descarga → éxito inmediato", async () => {
+describe("TuiApplication downloads", () => {
+  it("downloads selected course materials to the current directory after confirmation", async () => {
     const { app, terminal, stdout, stderr, calls } = make([
-      key("enter"), // Alfa (primero alfabéticamente)
-      key("space"), key("down"), key("space"), // marca Tema A y Tema B
-      key("enter"), key("enter"), key("enter"), // continuar, confirmar, carpeta actual
+      key("enter"), // Open Alfa, the first course alphabetically.
+      key("space"), key("down"), key("space"), // Select Tema A and Tema B.
+      key("enter"), key("enter"), key("enter"), // Continue, confirm, and use the current folder.
     ]);
     assert.equal(await app.run(), 0);
     assert.deepEqual(calls, [{ items: ["a", "b"], dest: "carpeta-actual/content/Alfa" }]);
-    assert.equal(stdout.output, "✓ Descarga completada: 2 archivos nuevos, 0 ya existían — carpeta-actual/content\n");
+    assert.equal(stdout.output, "Download complete. New files: 2, already present: 0. Destination: carpeta-actual/content\n");
     assert.equal(stderr.output, "");
     assert.deepEqual([terminal.opened, terminal.closed, terminal.remainingKeys], [1, 1, 0]);
 
     const frames = terminal.allFrames();
-    assert.match(frames, /Cargando cursos…/);
+    assert.match(frames, /Loading courses\.\.\./);
     assert.match(frames, /> \[ \] Alfa\n  \[ \] Beta/);
-    assert.match(frames, /Cargando el contenido de «Alfa»…/);
-    assert.ok(frames.indexOf("Semana 1 — Uno") < frames.indexOf("Semana 3 — Tres"));
-    assert.match(frames, /Confirmar la descarga de 2 contenidos/);
-    assert.match(frames, /En la carpeta actual \(/);
-    assert.match(frames, /Descargando 0\/2/);
+    assert.match(frames, /Loading materials for "Alfa"\.\.\./);
+    assert.ok(frames.indexOf("Section 1 - Uno") < frames.indexOf("Section 3 - Tres"));
+    assert.match(frames, /Confirm download \(2 selected\)/);
+    assert.match(frames, /Current directory \(/);
+    assert.match(frames, /Downloading 0\/2/);
   });
 
-  it("el progreso por contenido se dibuja con el nombre y una barra", async () => {
+  it("shows the current material name and progress bar", async () => {
     const { app, terminal } = make([key("enter"), ...chars("A"), key("enter"), key("enter"), key("enter")], {
       report: (items, logger) => {
         logger.progress({ done: 1, total: items.length, label: "Tema A" });
@@ -84,24 +84,24 @@ describe("TuiApplication · camino feliz", () => {
       },
     });
     await app.run();
-    assert.match(terminal.allFrames(), /Descargando 1\/3: Tema A\n[\s\S]*█+░+ 1\/3/);
+    assert.match(terminal.allFrames(), /Downloading 1\/3: Tema A\n[\s\S]*█+░+ 1\/3/);
   });
 
-  it("un destino distinto se escribe en una línea y se usa tal cual", async () => {
+  it("uses the custom destination entered by the user", async () => {
     const { app, calls } = make([key("enter"), key("space"), key("enter"), key("enter"), key("down"), key("enter"), ...chars("mi material"), key("enter")]);
     assert.equal(await app.run(), 0);
     assert.equal(calls[0]!.dest, "mi material/content/Alfa");
   });
 
-  it("muestra cuántos se omitieron por existir ya", async () => {
+  it("reports the number of files skipped because they already exist", async () => {
     const { app, stdout } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")], {
       report: (items) => ({ outcomes: [{ item: items[0]!, status: "skipped", path: "p" }], downloaded: 0, skipped: 1, failed: 0, aborted: false }),
     });
     assert.equal(await app.run(), 0);
-    assert.match(stdout.output, /0 archivos nuevos, 1 ya existían/);
+    assert.match(stdout.output, /New files: 0, already present: 1/);
   });
 
-  it("dibuja al oso con el aro en tres posiciones durante tres vueltas", async () => {
+  it("animates the bear and hoop for three cycles", async () => {
     const { app, terminal } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")]);
     assert.equal(await app.run(), 0);
     const frames = terminal.frames.filter((frame) => frame[0] === "Mulțumesc!");
@@ -116,43 +116,43 @@ describe("TuiApplication · camino feliz", () => {
     assert.deepEqual(frames.slice(0, 3), frames.slice(6, 9));
   });
 
-  it("permite continuar si uno de los cursos elegidos carece de materiales", async () => {
+  it("continues when one selected course has no materials", async () => {
     const { app, terminal, calls } = make([
       ...chars("A"), key("enter"), key("space"), key("enter"),
       key("space"), key("enter"), key("enter"), key("enter"),
     ]);
     assert.equal(await app.run(), 0);
-    assert.match(terminal.allFrames(), /Este curso no tiene contenido descargable/);
+    assert.match(terminal.allFrames(), /This course has no downloadable materials/);
     assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/content/Alfa" }]);
   });
 
-  it("vuelve al selector si ninguno de los cursos elegidos tiene materiales", async () => {
+  it("returns to the course list when none of the selected courses have materials", async () => {
     const empty: CourseContents = { sections: [], items: [] };
     const { app, terminal, calls } = make([
       ...chars("A"), key("enter"), key("enter"), key("enter"), key("escape"),
     ], { contents: { "1": empty, "2": empty } });
     assert.equal(await app.run(), 130);
-    assert.match(terminal.lastFrame, /Tus cursos[\s\S]*\[x\] Alfa[\s\S]*\[x\] Beta/);
+    assert.match(terminal.lastFrame, /Your courses[\s\S]*\[x\] Alfa[\s\S]*\[x\] Beta/);
     assert.deepEqual(calls, []);
   });
 });
 
-describe("TuiApplication · navegación", () => {
-  it("Esc retrocede paso a paso conservando lo marcado", async () => {
+describe("TuiApplication navigation", () => {
+  it("keeps selections when navigating back with Escape", async () => {
     const { app, terminal, calls } = make([
-      key("enter"), key("space"), key("enter"), // elige curso, marca A, a confirmar
-      key("escape"), // vuelve a los contenidos
-      key("down"), key("space"), key("enter"), // marca también B y confirma
-      key("enter"), // confirmar
-      key("escape"), // desde el destino, vuelve a confirmar
-      key("enter"), key("enter"), // confirma de nuevo y elige la carpeta actual
+      key("enter"), key("space"), key("enter"), // Open the course, select A, and reach the confirmation screen.
+      key("escape"), // Return to the item list.
+      key("down"), key("space"), key("enter"), // Select B as well and continue.
+      key("enter"), // Confirm the selection.
+      key("escape"), // Return from the destination screen to confirmation.
+      key("enter"), key("enter"), // Confirm again and use the current folder.
     ]);
     assert.equal(await app.run(), 0);
     assert.deepEqual(calls[0]!.items, ["a", "b"]);
     assert.match(terminal.allFrames(), /\[x\] Tema A/);
   });
 
-  it("Esc entre cursos conserva incluso las marcas aún sin confirmar", async () => {
+  it("keeps unconfirmed selections when moving between courses with Escape", async () => {
     const { app, terminal, calls } = make([
       key("space"), key("down"), key("space"), key("enter"),
       key("space"), key("enter"),
@@ -160,31 +160,31 @@ describe("TuiApplication · navegación", () => {
       key("enter"), key("enter"), key("enter"), key("enter"),
     ], { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("z", "Z", 1)] } } });
     assert.equal(await app.run(), 0);
-    assert.match(terminal.allFrames(), /Curso 2 de 2/);
+    assert.match(terminal.allFrames(), /Course 2 of 2/);
     assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/content/Alfa" }, { items: ["z"], dest: "carpeta-actual/content/Beta" }]);
   });
 
-  it("Esc en los contenidos vuelve a la lista de cursos y permite elegir otro", async () => {
+  it("returns to the course list with Escape and allows another course to be opened", async () => {
     const { app, terminal, calls } = make([key("enter"), key("escape"), key("down"), key("enter"), key("escape"), key("escape")], {
       contents: { "1": alfa, "2": { sections: [{ number: 1, title: "Vacía" }], items: [] } },
     });
     assert.equal(await app.run(), 130);
-    assert.match(terminal.allFrames(), /no tiene contenido descargable/);
+    assert.match(terminal.allFrames(), /has no downloadable materials/);
     assert.deepEqual(calls, []);
   });
 
-  it("en el destino, Esc de la ruta vuelve a la lista y Esc de la lista vuelve a confirmar", async () => {
+  it("returns from path entry to the destination list and then to confirmation", async () => {
     const { app, calls } = make([
       key("enter"), key("space"), key("enter"), key("enter"),
-      key("down"), key("enter"), key("escape"), // abre la ruta y retrocede a la lista de destinos
-      key("escape"), // vuelve a confirmar
-      key("enter"), key("enter"), // confirma y elige la carpeta actual
+      key("down"), key("enter"), key("escape"), // Open path entry and return to the destination list.
+      key("escape"), // Return to confirmation.
+      key("enter"), key("enter"), // Confirm and use the current folder.
     ]);
     assert.equal(await app.run(), 0);
     assert.equal(calls[0]!.dest, "carpeta-actual/content/Alfa");
   });
 
-  it("recupera las marcas al volver a entrar en el mismo curso", async () => {
+  it("restores checked items when a course is reopened", async () => {
     const { app, terminal, calls } = make([
       key("enter"), key("space"), key("enter"),
       key("escape"), key("escape"),
@@ -195,7 +195,7 @@ describe("TuiApplication · navegación", () => {
     assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/content/Alfa" }]);
   });
 
-  it("guarda las marcas por curso al alternar entre dos cursos elegidos individualmente", async () => {
+  it("maintains independent selections when alternating between courses", async () => {
     const { app, terminal, calls } = make([
       key("enter"), key("space"), key("escape"),
       key("down"), key("enter"), key("space"), key("escape"),
@@ -203,7 +203,7 @@ describe("TuiApplication · navegación", () => {
       key("down"), key("enter"), key("enter"), key("enter"), key("enter"),
     ], { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("a", "Z", 1)] } } });
     assert.equal(await app.run(), 0);
-    const beta = terminal.frames.filter((frame) => frame[0]?.startsWith("«Beta»"));
+    const beta = terminal.frames.filter((frame) => frame[0]?.startsWith("Beta - Select materials"));
     assert.match(beta[0]!.join("\n"), /\[ \] Z/);
     assert.match(beta.at(-1)!.join("\n"), /\[x\] Z/);
     assert.deepEqual(calls, [
@@ -212,67 +212,67 @@ describe("TuiApplication · navegación", () => {
     ]);
   });
 
-  it("desmarcar un curso en la lista excluye sus materiales del total", async () => {
+  it("excludes selected materials when their course is unchecked", async () => {
     const { app, terminal, calls } = make([
       key("enter"), key("space"), key("escape"),
       key("space"), key("down"), key("enter"),
       key("space"), key("enter"), key("enter"), key("enter"),
     ], { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("z", "Z", 1)] } } });
     assert.equal(await app.run(), 0);
-    assert.match(terminal.allFrames(), /Cursos marcados: 1[\s\S]*\[x\] Alfa[\s\S]*Cursos marcados: 0/);
+    assert.match(terminal.allFrames(), /Courses selected: 1[\s\S]*\[x\] Alfa[\s\S]*Courses selected: 0/);
     assert.deepEqual(calls, [{ items: ["z"], dest: "carpeta-actual/content/Beta" }]);
   });
 });
 
-describe("TuiApplication · cancelación y errores", () => {
-  it("Esc o Ctrl+C en cualquier pantalla cancelan con el código 130 y restauran la terminal", async () => {
+describe("TuiApplication cancellation and errors", () => {
+  it("cancels from the selection flow with exit code 130 and restores the terminal", async () => {
     for (const script of [[key("escape")], [key("ctrl-c")], [key("enter"), key("ctrl-c")], [key("enter"), key("space"), key("enter"), key("ctrl-c")], [key("enter"), key("space"), key("enter"), key("enter"), key("ctrl-c")], [key("enter"), key("space"), key("enter"), key("enter"), key("down"), key("enter"), key("ctrl-c")]]) {
       const { app, terminal, stderr } = make(script);
       assert.equal(await app.run(), 130, JSON.stringify(script));
-      assert.equal(stderr.output, "Cancelado.\n");
+      assert.equal(stderr.output, "Cancelled.\n");
       assert.equal(terminal.closed, 1);
     }
   });
 
-  it("sin cursos lo dice y Esc sale", async () => {
+  it("shows a notice when there are no courses and exits on Escape", async () => {
     const { app, terminal } = make([key("enter"), key("escape")], { courses: [] });
     assert.equal(await app.run(), 130);
-    assert.match(terminal.allFrames(), /No hay cursos para mostrar/);
+    assert.match(terminal.allFrames(), /No courses to show/);
   });
 
-  it("un error al cargar se propaga y la terminal queda restaurada", async () => {
+  it("propagates loading errors and restores the terminal", async () => {
     const { app, terminal } = make([key("enter")], { contents: { "1": new AuthenticationError("sesión"), "2": alfa } });
     await assert.rejects(app.run(), AuthenticationError);
     assert.deepEqual([terminal.opened, terminal.closed], [1, 1]);
   });
 
-  it("los fallos se muestran en una pantalla, se imprimen al salir y dan código 1", async () => {
+  it("shows download failures, prints the summary, and exits with code 1", async () => {
     const failing = (items: readonly CourseItem[]): BatchReport => ({
       outcomes: [
         { item: items[0]!, status: "downloaded", path: "p", bytes: 1 },
-        { item: items[1]!, status: "failed", error: new DownloadError("sin red"), authentication: false },
+        { item: items[1]!, status: "failed", error: new DownloadError("no network"), authentication: false },
       ],
       downloaded: 1, skipped: 0, failed: 1, aborted: false,
     });
     const { app, terminal, stdout, stderr } = make([key("enter"), ...chars("A"), key("enter"), key("enter"), key("enter"), key("space")], { report: failing });
     assert.equal(await app.run(), 1);
-    assert.match(terminal.allFrames(), /Hubo errores en la descarga[\s\S]*Fallo en «Tema B»: sin red/);
-    assert.match(stderr.output, /Fallo en «Tema B»: sin red[\s\S]*Descargados: 1 · Omitidos: 0 · Fallidos: 1/);
+    assert.match(terminal.allFrames(), /Some downloads failed[\s\S]*Failed to download "Tema B": no network/);
+    assert.match(stderr.output, /Failed to download "Tema B": no network[\s\S]*Downloaded: 1 \| Skipped: 0 \| Failed: 1/);
     assert.equal(stdout.output, "");
     assert.equal(terminal.remainingKeys, 0);
   });
 
-  it("una sesión caducada a mitad de lote da código 3 y lo explica", async () => {
+  it("reports an expired session and exits with code 3", async () => {
     const aborted = (items: readonly CourseItem[]): BatchReport => ({
       outcomes: [{ item: items[0]!, status: "failed", error: new AuthenticationError("sesión"), authentication: true }],
       downloaded: 0, skipped: 0, failed: 1, aborted: true,
     });
     const { app, stderr } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter"), key("enter")], { report: aborted });
     assert.equal(await app.run(), 3);
-    assert.match(stderr.output, /La sesión caducó/);
+    assert.match(stderr.output, /The Moodle session expired/);
   });
 
-  it("Ctrl+C en la pantalla de errores no impide terminar con el código del lote", async () => {
+  it("preserves the batch exit code when Ctrl+C dismisses the failure screen", async () => {
     const failing = (items: readonly CourseItem[]): BatchReport => ({
       outcomes: [{ item: items[0]!, status: "failed", error: new DownloadError("x"), authentication: false }],
       downloaded: 0, skipped: 0, failed: 1, aborted: false,
@@ -285,18 +285,18 @@ describe("TuiApplication · cancelación y errores", () => {
 describe("CookiePrompt", () => {
   const make2 = (keys: KeyPress[]) => {
     const terminal = new ScriptedTerminal(keys);
-    return { terminal, prompt: new CookiePrompt({ terminal, messages: es, layout: new FrameLayout({ colors: false }) }) };
+    return { terminal, prompt: new CookiePrompt({ terminal, messages: en, layout: new FrameLayout({ colors: false }) }) };
   };
 
-  it("pide la cookie con la entrada oculta, la devuelve y restaura la terminal", async () => {
+  it("masks the cookie entry, returns the value, and restores the terminal", async () => {
     const { terminal, prompt } = make2([...chars("MoodleSession=abc123"), key("enter")]);
     assert.equal(await prompt.ask(), "MoodleSession=abc123");
     assert.ok(!terminal.allFrames().includes("abc123"));
-    assert.match(terminal.allFrames(), /Falta la cookie de sesión de Moodle[\s\S]*Cookie: •{20}▌/);
+    assert.match(terminal.allFrames(), /Moodle session cookie required[\s\S]*Cookie: •{20}▌/);
     assert.deepEqual([terminal.opened, terminal.closed], [1, 1]);
   });
 
-  it("Esc o Ctrl+C devuelven undefined", async () => {
+  it("returns undefined when Escape or Ctrl+C dismisses the prompt", async () => {
     assert.equal(await make2([key("escape")]).prompt.ask(), undefined);
     assert.equal(await make2([key("ctrl-c")]).prompt.ask(), undefined);
   });

@@ -1,6 +1,6 @@
 import type { Logger, ProgressUpdate } from "./ports.ts";
 
-/** Deja pasar solo los avisos: para componentes anidados cuyo progreso sería ruido (cada SCORM dentro de un lote). */
+/** Forwards warnings from nested work while the outer batch owns progress. */
 export class QuietLogger implements Logger {
   private readonly inner: Logger;
 

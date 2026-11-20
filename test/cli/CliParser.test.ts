@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import { CliParser } from "../../src/cli/CliParser.ts";
 import { HelpFormatter } from "../../src/cli/HelpFormatter.ts";
 import { UsageError } from "../../src/domain/errors.ts";
@@ -10,12 +10,12 @@ function makeParser(env: Record<string, string | undefined> = {}): CliParser {
   return new CliParser({
     version: "1.2.3",
     env,
-    messages: es,
-    help: new HelpFormatter({ programName: "scorm-to-pdf", messages: es }),
+    messages: en,
+    help: new HelpFormatter({ programName: "scorm-to-pdf", messages: en }),
   });
 }
 
-/** Vista plana de la orden heredada (SCORM por ID) para conservar las aserciones históricas. */
+/** Flatten the legacy SCORM command for the existing assertions. */
 function parseRun(argv: string[], env: Record<string, string | undefined> = {}) {
   const command: CliCommand = makeParser(env).parse(argv);
   assert.equal(command.kind, "scorm");
@@ -33,12 +33,12 @@ function assertUsageError(argv: string[], pattern: RegExp, env: Record<string, s
   assert.throws(
     () => makeParser(env).parse(argv),
     (error: unknown) => error instanceof UsageError && pattern.test(error.message),
-    `argv ${JSON.stringify(argv)} debería fallar con ${pattern}`,
+    `Expected ${JSON.stringify(argv)} to fail with ${pattern}`,
   );
 }
 
-describe("CliParser · ejecución válida", () => {
-  it("solo con el ID aplica todos los valores por defecto", () => {
+describe("CliParser valid inputs", () => {
+  it("applies the defaults when given only an ID", () => {
     const options = parseRun(["10067"]);
     assert.deepEqual(options, {
       scormId: 10067,
@@ -56,7 +56,7 @@ describe("CliParser · ejecución válida", () => {
     });
   });
 
-  it("acepta opciones largas con espacio o con '=' y cortas", () => {
+  it("accepts short options and long options with a space or equals sign", () => {
     const options = parseRun(["10067", "--out", "a.pdf", "--concurrency=3", "-q", "--revision", "4", "--entry=deck/start.html"]);
     assert.equal(options.outPath, "a.pdf");
     assert.equal(options.concurrency, 3);
@@ -65,33 +65,33 @@ describe("CliParser · ejecución válida", () => {
     assert.equal(options.entry, "deck/start.html");
   });
 
-  it("acepta flags cortas agrupadas y el ID después de las opciones", () => {
+  it("accepts grouped short flags before the ID", () => {
     const options = parseRun(["-qo", "salida.pdf", "10067"]);
     assert.equal(options.quiet, true);
     assert.equal(options.outPath, "salida.pdf");
     assert.equal(options.scormId, 10067);
   });
 
-  it("acepta --out-dir para el nombre automático", () => {
+  it("accepts --out-dir for automatically named output", () => {
     assert.equal(parseRun(["10067", "-d", "pdfs"]).outDir, "pdfs");
   });
 
-  it("el terminador -- permite pasar el ID como posicional", () => {
+  it("accepts the ID after the option terminator", () => {
     assert.equal(parseRun(["--", "10067"]).scormId, 10067);
   });
 
-  it("MOODLE_BASE_URL cambia la base y --base-url tiene prioridad sobre el entorno", () => {
+  it("reads MOODLE_BASE_URL and gives --base-url priority", () => {
     const env = { MOODLE_BASE_URL: "https://moodle.example.org/lms" };
     assert.equal(parseRun(["1"], env).baseUrl!.href, "https://moodle.example.org/lms/");
     assert.equal(parseRun(["1", "--base-url", "https://otro.example.org"], env).baseUrl!.href, "https://otro.example.org/");
   });
 
-  it("permite http únicamente en localhost y 127.0.0.1", () => {
+  it("accepts HTTP on loopback hosts", () => {
     assert.equal(parseRun(["1", "--base-url", "http://localhost:8080"]).baseUrl!.origin, "http://localhost:8080");
     assert.equal(parseRun(["1", "--base-url=http://127.0.0.1:9"]).baseUrl!.origin, "http://127.0.0.1:9");
   });
 
-  it("extrae ID, base, revisión y entrada de una URL de pluginfile", () => {
+  it("extracts the ID, base URL, revision, and entry from a pluginfile URL", () => {
     const options = parseRun(["https://kb.cunbm.utcluj.ro/pluginfile.php/10067/mod_scorm/content/3/index.html"]);
     assert.equal(options.scormId, 10067);
     assert.equal(options.baseUrl!.href, "https://kb.cunbm.utcluj.ro/");
@@ -99,13 +99,13 @@ describe("CliParser · ejecución válida", () => {
     assert.equal(options.entry, "index.html");
   });
 
-  it("respeta el prefijo de instalación de Moodle en la URL", () => {
+  it("preserves the Moodle installation path in the URL", () => {
     const options = parseRun(["https://host.example/moodle/pluginfile.php/55/mod_scorm/content/2/deck/start.html"]);
     assert.equal(options.baseUrl!.href, "https://host.example/moodle/");
     assert.equal(options.entry, "deck/start.html");
   });
 
-  it("las opciones explícitas tienen prioridad sobre lo deducido de la URL", () => {
+  it("prefers explicit options to values inferred from the URL", () => {
     const options = parseRun([
       "https://kb.cunbm.utcluj.ro/pluginfile.php/10067/mod_scorm/content/3/index.html",
       "--revision", "9", "--entry", "otro.html", "--base-url", "https://b.example",
@@ -116,65 +116,65 @@ describe("CliParser · ejecución válida", () => {
   });
 });
 
-describe("CliParser · ayuda y versión", () => {
-  it("--help y -h devuelven el texto del formateador sin exigir el ID", () => {
-    const expected = new HelpFormatter({ programName: "scorm-to-pdf", messages: es }).format();
+describe("CliParser help and version", () => {
+  it("shows help with --help or -h without a module ID", () => {
+    const expected = new HelpFormatter({ programName: "scorm-to-pdf", messages: en }).format();
     assert.deepEqual(makeParser().parse(["--help"]), { kind: "help", text: expected });
     assert.deepEqual(makeParser().parse(["-h"]), { kind: "help", text: expected });
   });
 
-  it("--version y -v devuelven programa y versión", () => {
+  it("shows the program name and version with --version or -v", () => {
     assert.deepEqual(makeParser().parse(["--version"]), { kind: "version", text: "scorm-to-pdf 1.2.3\n" });
     assert.deepEqual(makeParser().parse(["-v"]), { kind: "version", text: "scorm-to-pdf 1.2.3\n" });
   });
 
-  it("la ayuda tiene prioridad sobre la versión cuando se piden ambas", () => {
+  it("shows help when both help and version are requested", () => {
     assert.equal(makeParser().parse(["--version", "--help"]).kind, "help");
   });
 });
 
-describe("CliParser · errores de uso", () => {
+describe("CliParser usage errors", () => {
   const cases: Array<[string, string[], RegExp]> = [
-    ["más de un posicional", ["1", "2"], /Solo se admite un ID/],
-    ["ID no numérico", ["abc"], /ni un ID numérico ni una URL/],
-    ["ID cero", ["0"], /ID.*entre 1 y 2147483647/],
-    ["ID demasiado grande", ["99999999999"], /ID.*entre 1 y 2147483647/],
-    ["URL que no es de pluginfile", ["https://example.com/otra/cosa"], /pluginfile\.php/],
-    ["opción desconocida con sugerencia", ["1", "--ot"], /--ot.*¿Quisiste decir --out\?/],
-    ["opción de otra orden", ["courses", "--week", "1"], /--week/],
-    ["con dos candidatos cercanos sugiere el más parecido", ["1", "--ouit"], /¿Quisiste decir --out\?/],
-    ["opción desconocida sin sugerencia", ["1", "--zzzzzz"], /--zzzzzz(?!.*Quisiste)/],
-    ["flag corta desconocida", ["1", "-x"], /-x/],
-    ["valor ausente al final", ["1", "--out"], /--out.*requiere un valor/],
-    ["valor que parece otra opción", ["1", "-o", "--quiet"], /--out.*requiere un valor/],
-    ["valor vacío inline", ["1", "--out="], /--out.*requiere un valor/],
-    ["flag booleana con valor", ["1", "--quiet=si"], /--quiet.*no admite un valor/],
-    ["concurrencia cero", ["1", "-c", "0"], /--concurrency.*entre 1 y 32/],
-    ["concurrencia excesiva", ["1", "-c", "33"], /--concurrency.*entre 1 y 32/],
-    ["concurrencia no numérica", ["1", "-c", "mucha"], /--concurrency.*«mucha»/],
-    ["revisión no numérica", ["1", "--revision=x"], /--revision.*entero/],
-    ["--out con --out-dir", ["1", "-o", "a.pdf", "-d", "dir"], /--out.*--out-dir.*a la vez/],
-    ["opción repetida", ["1", "-o", "a", "-o", "b"], /--out.*más de una vez/],
-    ["entrada con ..", ["1", "--entry", "../x.html"], /--entry/],
-    ["entrada absoluta", ["1", "--entry", "/etc/passwd"], /--entry/],
-    ["entrada con segmento .", ["1", "--entry", "./a.html"], /--entry/],
-    ["entrada con barra doble", ["1", "--entry", "a//b"], /--entry/],
-    ["entrada con barra invertida", ["1", "--entry", "a\\b"], /--entry/],
-    ["entrada con query", ["1", "--entry", "a.html?x=1"], /--entry/],
-    ["base http remota", ["1", "--base-url", "http://moodle.example.org"], /https/],
-    ["base que no es URL", ["1", "--base-url", "no es url"], /URL base no válida/],
+    ["multiple positional arguments", ["1", "2"], /Specify one SCORM ID/],
+    ["nonnumeric ID", ["abc"], /is not a numeric ID or a pluginfile/],
+    ["ID of zero", ["0"], /ID.*from 1 to 2147483647/],
+    ["ID above the limit", ["99999999999"], /ID.*from 1 to 2147483647/],
+    ["URL outside the pluginfile endpoint", ["https://example.com/otra/cosa"], /pluginfile\.php/],
+    ["unknown option with a suggestion", ["1", "--ot"], /--ot.*Did you mean --out\?/],
+    ["option from a different command", ["courses", "--week", "1"], /--week/],
+    ["closest suggestion when two options are similar", ["1", "--ouit"], /Did you mean --out\?/],
+    ["unknown option without a suggestion", ["1", "--zzzzzz"], /--zzzzzz(?!.*Did you mean)/],
+    ["unknown short flag", ["1", "-x"], /-x/],
+    ["missing value at the end of the command", ["1", "--out"], /--out.*requires a value/],
+    ["value that resembles another option", ["1", "-o", "--quiet"], /--out.*requires a value/],
+    ["empty inline value", ["1", "--out="], /--out.*requires a value/],
+    ["boolean flag with a value", ["1", "--quiet=si"], /--quiet.*does not take a value/],
+    ["concurrency of zero", ["1", "-c", "0"], /--concurrency.*from 1 to 32/],
+    ["concurrency above the limit", ["1", "-c", "33"], /--concurrency.*from 1 to 32/],
+    ["nonnumeric concurrency", ["1", "-c", "mucha"], /--concurrency.*"mucha"/],
+    ["nonnumeric revision", ["1", "--revision=x"], /--revision.*integer/],
+    ["combined --out and --out-dir", ["1", "-o", "a.pdf", "-d", "dir"], /either --out or --out-dir/],
+    ["repeated option", ["1", "-o", "a", "-o", "b"], /--out.*more than once/],
+    ["entry with a parent directory segment", ["1", "--entry", "../x.html"], /--entry/],
+    ["absolute entry path", ["1", "--entry", "/etc/passwd"], /--entry/],
+    ["entry with a current directory segment", ["1", "--entry", "./a.html"], /--entry/],
+    ["entry with a double slash", ["1", "--entry", "a//b"], /--entry/],
+    ["entry with a backslash", ["1", "--entry", "a\\b"], /--entry/],
+    ["entry with a query string", ["1", "--entry", "a.html?x=1"], /--entry/],
+    ["remote HTTP base URL", ["1", "--base-url", "http://moodle.example.org"], /HTTPS/],
+    ["invalid base URL", ["1", "--base-url", "not a URL"], /Invalid base URL/],
   ];
   for (const [name, argv, pattern] of cases) {
     it(name, () => assertUsageError(argv, pattern));
   }
 
-  it("un MOODLE_BASE_URL inválido nombra la variable de entorno", () => {
+  it("names the environment variable when MOODLE_BASE_URL is invalid", () => {
     assertUsageError(["1"], /MOODLE_BASE_URL/, { MOODLE_BASE_URL: "http://moodle.example.org" });
   });
 });
 
-describe("CliParser · órdenes", () => {
-  it("ascii usa el parser común, incluidos los alias antes de la orden", () => {
+describe("CliParser commands", () => {
+  it("accepts shared options and aliases before the ascii command", () => {
     const command = parseKind(
       ["-w", "40.0", "-o", "out.json", "ascii", "input.png", "--bg", "--tone=0", "--fps", "12.5", "--chars=", "-q"],
       "ascii",
@@ -182,51 +182,51 @@ describe("CliParser · órdenes", () => {
     );
     assert.equal(command.request.kind, "convert");
     assert.equal(command.global.quiet, true);
-    if (command.request.kind !== "convert") assert.fail("se esperaba una conversión");
+    if (command.request.kind !== "convert") assert.fail("Expected an ASCII conversion");
     const { input, options } = command.request;
     assert.deepEqual([input, options.cols, options.out, options.bg, options.tone, options.fps, options.chars],
       ["input.png", 40, "out.json", true, 0, 12.5, ""]);
     assert.equal(parseKind(["ascii", "--prepare"], "ascii").request.kind, "prepare");
-    assert.match(parseKind(["ascii", "--help"], "help").text, /ascii <entrada>.*--prepare/s);
+    assert.match(parseKind(["ascii", "--help"], "help").text, /ascii <input>.*--prepare/s);
   });
 
-  it("ascii valida sus argumentos y usa los mismos diagnósticos de opciones", () => {
-    assertUsageError(["ascii"], /Falta la imagen/);
-    assertUsageError(["ascii", "a.png", "b.png"], /una sola/);
-    assertUsageError(["ascii", "--prepare", "a.png"], /--prepare se usa sin entrada/);
-    assertUsageError(["ascii", "--prepare", "--loop"], /--prepare se usa sin entrada/);
+  it("validates ASCII arguments and uses the common option errors", () => {
+    assertUsageError(["ascii"], /Specify an image or video/);
+    assertUsageError(["ascii", "a.png", "b.png"], /accepts one image or video/);
+    assertUsageError(["ascii", "--prepare", "a.png"], /Use --prepare by itself/);
+    assertUsageError(["ascii", "--prepare", "--loop"], /Use --prepare by itself/);
     assertUsageError(["ascii", "a.png", "--gamma", "Infinity"], /--gamma/);
     assertUsageError(["ascii", "a.png", "--fps", "61"], /--fps/);
     assertUsageError(["ascii", "a.png", "--tone=-1"], /--tone/);
-    assertUsageError(["ascii", "a.png", "--cols"], /--cols requiere un valor/);
-    assertUsageError(["ascii", "a.png", "--cols=1.5"], /entero entre 1 y 500/);
-    assertUsageError(["ascii", "a.png", "--cols=30", "-w", "40"], /--cols se indicó más de una vez/);
-    assertUsageError(["ascii", "a.png", "--colx=30"], /¿Quisiste decir --cols/);
+    assertUsageError(["ascii", "a.png", "--cols"], /--cols requires a value/);
+    assertUsageError(["ascii", "a.png", "--cols=1.5"], /integer from 1 to 500/);
+    assertUsageError(["ascii", "a.png", "--cols=30", "-w", "40"], /--cols was specified more than once/);
+    assertUsageError(["ascii", "a.png", "--colx=30"], /Did you mean --cols/);
   });
 
-  it("sin argumentos o solo con opciones generales abre el selector interactivo", () => {
+  it("opens the interactive selector with no arguments or only global options", () => {
     assert.equal(parseKind([], "tui").global.quiet, false);
     assert.equal(parseKind(["-q"], "tui").global.quiet, true);
     assert.equal(parseKind(["--trace"], "tui").global.trace, true);
     assert.equal(parseKind(["tui"], "tui").kind, "tui");
   });
 
-  it("courses y diagnose no admiten argumentos; courses acepta --json", () => {
+  it("rejects positional arguments for courses and diagnose and accepts courses --json", () => {
     assert.equal(parseKind(["courses"], "courses").json, false);
     assert.equal(parseKind(["courses", "--json"], "courses").json, true);
     assert.equal(parseKind(["diagnose"], "diagnose").kind, "diagnose");
-    assertUsageError(["courses", "extra"], /courses.*no admite argumentos/);
-    assertUsageError(["diagnose", "extra"], /diagnose.*no admite argumentos/);
+    assertUsageError(["courses", "extra"], /Unexpected arguments for courses/);
+    assertUsageError(["diagnose", "extra"], /Unexpected arguments for diagnose/);
   });
 
-  it("items exige exactamente un curso", () => {
+  it("requires exactly one course for items", () => {
     assert.equal(parseKind(["items", "algoritmi"], "items").course, "algoritmi");
     assert.equal(parseKind(["items", "101", "--json"], "items").json, true);
-    assertUsageError(["items"], /Falta el curso.*items/);
-    assertUsageError(["items", "a", "b"], /items.*no admite argumentos/);
+    assertUsageError(["items"], /Specify a course ID.*items/);
+    assertUsageError(["items", "a", "b"], /Unexpected arguments for items/);
   });
 
-  it("get selecciona por semanas (ordenadas y sin repetir), por ids o con --all", () => {
+  it("accepts sorted unique sections, item IDs, or --all for get", () => {
     const byWeek = parseKind(["get", "algoritmi", "--week", "3,1,3"], "get");
     assert.deepEqual([byWeek.course, byWeek.weeks, byWeek.items, byWeek.all, byWeek.dest], ["algoritmi", [1, 3], undefined, false, "."]);
     assert.deepEqual(parseKind(["get", "x", "--item", "531, 7"], "get").items, ["7", "531"]);
@@ -235,24 +235,24 @@ describe("CliParser · órdenes", () => {
     assert.equal(parseKind(["get", "x", "--week", "0"], "get").weeks![0], 0);
   });
 
-  it("get valida la selección", () => {
-    assertUsageError(["get", "x"], /nada que descargar/);
+  it("validates the get selection", () => {
+    assertUsageError(["get", "x"], /Nothing to download/);
     assertUsageError(["get", "x", "--all", "--week", "1"], /--all.*--week/);
     assertUsageError(["get", "x", "--all", "--item", "1"], /--all/);
-    assertUsageError(["get"], /Falta el curso.*get/);
-    assertUsageError(["get", "x", "--week", "1,,3"], /--week.*lista de números/);
+    assertUsageError(["get"], /Specify a course ID.*get/);
+    assertUsageError(["get", "x", "--week", "1,,3"], /--week.*comma-separated list of integers/);
     assertUsageError(["get", "x", "--week", "a"], /--week/);
     assertUsageError(["get", "x", "--item", "1,x"], /--item/);
   });
 
-  it("las opciones generales se leen antes o después de la orden", () => {
-    const command = parseKind(["-q", "courses", "--platform", "ro.utcluj.kb", "--lang", "es", "-c", "3", "--trace-dir", "t"], "courses");
+  it("accepts global options before or after the command", () => {
+    const command = parseKind(["-q", "courses", "--platform", "ro.utcluj.kb", "--lang", "en", "-c", "3", "--trace-dir", "t"], "courses");
     assert.deepEqual(command.global, {
-      platform: "ro.utcluj.kb", baseUrl: undefined, lang: "es", concurrency: 3, trace: false, traceDir: "t", quiet: true,
+      platform: "ro.utcluj.kb", baseUrl: undefined, lang: "en", concurrency: 3, trace: false, traceDir: "t", quiet: true,
     });
   });
 
-  it("el entorno aporta SCORM_PLATFORM, SCORM_TRACE y MOODLE_BASE_URL; las opciones tienen prioridad", () => {
+  it("reads platform, trace, and base URL from the environment and gives options priority", () => {
     const env = { SCORM_PLATFORM: "ro.utcluj.kb", SCORM_TRACE: "1", MOODLE_BASE_URL: "https://m.example.org" };
     const fromEnv = parseKind(["courses"], "courses", env).global;
     assert.deepEqual([fromEnv.platform, fromEnv.trace, fromEnv.baseUrl!.origin], ["ro.utcluj.kb", true, "https://m.example.org"]);

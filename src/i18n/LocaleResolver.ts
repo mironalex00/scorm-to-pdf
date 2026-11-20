@@ -7,9 +7,8 @@ export interface ResolvedLocale {
 }
 
 /**
- * Elige el catálogo de idioma. Prioridad: --lang, SCORM_LANG, LANG, idioma por defecto.
- * Un idioma pedido con --lang que no existe es un error; uno que llega solo por el entorno
- * (LANG suele valer «C» o «fr_FR.UTF-8») cae en silencio al idioma por defecto.
+ * Resolves the locale from --lang, SCORM_LANG, LANG, then the default. An unsupported explicit flag
+ * is a usage error.
  */
 export class LocaleResolver {
   private readonly catalogs: Readonly<Record<string, Messages>>;

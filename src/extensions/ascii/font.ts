@@ -1,4 +1,4 @@
-// Glifos ASCII 5×7. Cinco columnas por glifo; el bit bajo es la fila superior.
+// The 5-by-7 glyphs use one byte per column. The lowest bit is the top row.
 export const FONT = Uint8Array.from(`
 00 00 00 00 00  00 00 5F 00 00  00 07 00 07 00  14 7F 14 7F 14  24 2A 7F 2A 12  23 13 08 64 62
 36 49 55 22 50  00 05 03 00 00  00 1C 22 41 00  00 41 22 1C 00  08 2A 1C 2A 08  08 08 3E 08 08

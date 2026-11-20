@@ -14,10 +14,7 @@ interface StepResult {
   readonly authentication?: boolean;
 }
 
-/**
- * Recorre la cadena completa contra la instalación real (cursos, contenido, un recurso, un SCORM)
- * y deja una traza con capturas redactadas: lo que hace falta para localizar dónde falla algo.
- */
+/** Checks course listing, course contents, and representative resource and SCORM downloads. */
 export class DiagnoseCommand implements Command {
   private readonly platform: LearningPlatform;
   private readonly catalog: CatalogService;
@@ -77,12 +74,13 @@ export class DiagnoseCommand implements Command {
       return commands.detailScorm({ name: found.scorm.name });
     });
 
-    this.logger.result(commands.diagnoseTrace({ path: this.tracer.flush() ?? "" }));
+    const trace = this.tracer.flush();
+    if (trace !== undefined) this.logger.result(commands.diagnoseTrace({ path: trace }));
     if (!failed) return 0;
     return sessionLost ? 3 : 1;
   }
 
-  /** Busca, entre los primeros cursos, un recurso y un SCORM con los que probar la resolución. */
+  /** Looks for a resource and a SCORM sample in the first few courses. */
   private async locateSamples(
     courses: readonly CourseSummary[],
     found: { contents?: CourseContents; resource?: CourseItem; scorm?: CourseItem },

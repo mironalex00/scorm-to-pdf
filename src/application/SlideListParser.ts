@@ -11,8 +11,7 @@ export interface Deck {
   readonly slides: readonly Slide[];
 }
 
-// El SCORM define SLIDES como un array compatible con JSON. Se ancla el final en
-// «const N» para que los corchetes dentro del texto de las diapositivas no importen.
+// Anchor the slide array to the count declaration so brackets in slide text are safe.
 const SLIDES_ARRAY = /const\s+SLIDES\s*=\s*(\[[\s\S]*?\])\s*;\s*(?=const\s+N\b)/;
 const TITLE_TAG = /<title>([\s\S]*?)<\/title>/i;
 

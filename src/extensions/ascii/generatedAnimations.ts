@@ -1,4 +1,4 @@
-// Generado por npm run ascii:art desde content/. Edita el generador, no estos cuadros.
+// Generated from content/ by npm run ascii:art.
 import type { AsciiClip } from "./index.ts";
 
 export const asciiAnimations = {

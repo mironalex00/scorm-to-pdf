@@ -1,11 +1,11 @@
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TraceSink } from "./Tracer.ts";
 
-/** Traza en una carpeta: `trace.jsonl` (un evento por línea) y `snapshots/NN-nombre.txt`. */
 export class FileTraceSink implements TraceSink {
   private readonly dir: string;
   private snapshotCount = 0;
+  private wroteTrace = false;
 
   constructor(deps: { dir: string }) {
     this.dir = deps.dir;
@@ -13,26 +13,46 @@ export class FileTraceSink implements TraceSink {
 
   write(line: string): void {
     try {
-      mkdirSync(this.dir, { recursive: true });
-      appendFileSync(join(this.dir, "trace.jsonl"), `${line}\n`);
-    } catch {
-      // best-effort
-    }
+      this.ensureDirectory(this.dir);
+      const flags = constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+      const file = openSync(join(this.dir, "trace.jsonl"), flags, 0o600);
+      try {
+        const entry = fstatSync(file);
+        if (!entry.isFile() || entry.nlink !== 1 || (process.platform !== "win32" && (entry.mode & 0o077) !== 0)) return;
+        writeFileSync(file, `${line}\n`);
+        this.wroteTrace = true;
+      } finally {
+        closeSync(file);
+      }
+    } catch { /* Diagnostics should not interrupt the download. */ }
   }
 
-  snapshot(name: string, content: string): void {
+  snapshot(name: string, content: string): boolean {
     try {
       const folder = join(this.dir, "snapshots");
-      mkdirSync(folder, { recursive: true });
-      this.snapshotCount += 1;
+      this.ensureDirectory(this.dir);
+      this.ensureDirectory(folder);
       const safe = name.replace(/[^\w.-]+/g, "_");
-      writeFileSync(join(folder, `${String(this.snapshotCount).padStart(2, "0")}-${safe}.txt`), content);
+      for (;;) {
+        const index = String(++this.snapshotCount).padStart(2, "0");
+        try {
+          writeFileSync(join(folder, `${index}-${safe}.txt`), content, { flag: "wx", mode: 0o600 });
+          return true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") return false;
+        }
+      }
     } catch {
-      // best-effort
+      return false;
     }
   }
 
-  location(): string {
-    return this.dir;
+  location(): string | undefined {
+    return this.wroteTrace ? this.dir : undefined;
+  }
+
+  private ensureDirectory(path: string): void {
+    mkdirSync(path, { recursive: true, mode: 0o700 });
+    if (!lstatSync(path).isDirectory()) throw new Error("Expected a trace directory");
   }
 }

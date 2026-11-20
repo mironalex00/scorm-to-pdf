@@ -4,10 +4,7 @@ import type { Messages } from "../i18n/Messages.ts";
 
 const DEFAULT_COOKIE_NAME = "MoodleSession";
 
-/**
- * Cookie de sesión de Moodle. El valor vive en un campo privado y solo sale por
- * `headerValue()`: imprimirla, serializarla o inspeccionarla muestra únicamente los nombres.
- */
+/** The session cookie value is private. Inspection and serialization show cookie names. */
 export class SessionCookie {
   readonly #header: string;
 
@@ -15,7 +12,7 @@ export class SessionCookie {
     this.#header = header;
   }
 
-  /** Acepta la cabecera Cookie completa, «nombre=valor» o solo el valor de MoodleSession. */
+  /** Accepts a Cookie header, a name-value pair, or a bare MoodleSession value. */
   static parse(raw: string | undefined, messages: Messages): SessionCookie {
     let text = (raw ?? "").trim().replace(/^cookie:\s*/i, "");
     text = text.replace(/^(['"])([\s\S]*)\1$/, "$2").trim();
@@ -33,7 +30,7 @@ export class SessionCookie {
     return this.#header;
   }
 
-  /** Los valores de cada cookie, para registrarlos como secretos en la traza. */
+  /** Values registered with the trace redactor. */
   secretValues(): string[] {
     return this.#header
       .split(";")

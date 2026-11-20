@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeFileSink } from "../../src/infra/NodeFileSink.ts";
 import { OutputError } from "../../src/domain/errors.ts";
 
 let dir: string;
-const sink = new NodeFileSink({ messages: es });
+const sink = new NodeFileSink({ messages: en });
 
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "scorm-sink-"));
@@ -16,19 +16,19 @@ beforeEach(async () => {
 afterEach(() => rm(dir, { recursive: true, force: true }));
 
 describe("NodeFileSink", () => {
-  it("crea las carpetas que falten, escribe el contenido y devuelve la ruta absoluta", async () => {
+  it("creates missing directories and returns the absolute output path", async () => {
     const target = join(dir, "a", "b", "salida.pdf");
     const written = await sink.write(target, Uint8Array.of(1, 2, 3));
     assert.equal(written, target);
     assert.deepEqual([...(await readFile(target))], [1, 2, 3]);
   });
 
-  it("exists distingue entre un archivo presente y uno ausente", async () => {
+  it("distinguishes an existing file from a missing path", async () => {
     await sink.write(join(dir, "hay.pdf"), Uint8Array.of(1));
     assert.deepEqual([await sink.exists(join(dir, "hay.pdf")), await sink.exists(join(dir, "no-hay.pdf"))], [true, false]);
   });
 
-  it("resuelve rutas relativas contra el directorio actual", async () => {
+  it("resolves relative paths against the working directory", async () => {
     const previous = process.cwd();
     process.chdir(dir);
     try {
@@ -40,7 +40,7 @@ describe("NodeFileSink", () => {
     }
   });
 
-  it("reemplaza un archivo existente sin dejar temporales", async () => {
+  it("replaces an existing file and removes the staging directory", async () => {
     const target = join(dir, "x.pdf");
     await writeFile(target, "viejo");
     await sink.write(target, Uint8Array.of(7));
@@ -48,14 +48,42 @@ describe("NodeFileSink", () => {
     assert.deepEqual(await readdir(dir), ["x.pdf"]);
   });
 
-  it("falla con OutputError si la carpeta no se puede crear", async () => {
+  it("publishes only one complete file when two writers target the same path", async () => {
+    const target = join(dir, "shared.pdf");
+    const payloads = [Buffer.alloc(64 * 1024, 1), Buffer.alloc(64 * 1024, 2)];
+    const written = await Promise.all(payloads.map((payload) => sink.writeIfAbsent(target, payload)));
+    assert.equal(written.filter((path) => path === target).length, 1);
+    assert.equal(written.filter((path) => path === undefined).length, 1);
+    assert.deepEqual(await readFile(target), payloads[written.indexOf(target)]);
+    assert.deepEqual(await readdir(dir), ["shared.pdf"]);
+  });
+
+  it("writes a 255-byte filename without leaving staging files", async () => {
+    const filename = `${"a".repeat(251)}.pdf`;
+    const target = join(dir, filename);
+    assert.equal(await sink.write(target, Uint8Array.of(5)), target);
+    assert.deepEqual([...(await readFile(target))], [5]);
+    assert.deepEqual(await readdir(dir), [filename]);
+  });
+
+  it("publishes files with owner-only permissions", { skip: process.platform === "win32" }, async () => {
+    const target = join(dir, "private.pdf");
+    await sink.writeIfAbsent(target, Uint8Array.of(1));
+    const mode = (await stat(target)).mode & 0o777;
+    assert.equal(mode, 0o600 & ~process.umask());
+  });
+
+  it("reports an output error when the parent cannot be created", async () => {
     await writeFile(join(dir, "archivo"), "x");
     await assert.rejects(sink.write(join(dir, "archivo", "hijo.pdf"), Uint8Array.of(1)), OutputError);
   });
 
-  it("falla con OutputError y limpia el temporal si el destino es una carpeta", async () => {
-    await mkdir(join(dir, "salida.pdf"));
-    await assert.rejects(sink.write(join(dir, "salida.pdf"), Uint8Array.of(1)), OutputError);
+  it("reports an output error and removes staging files when the target is a directory", async () => {
+    const target = join(dir, "salida.pdf");
+    await mkdir(target);
+    assert.equal(await sink.exists(target), false);
+    await assert.rejects(sink.write(target, Uint8Array.of(1)), OutputError);
+    await assert.rejects(sink.writeIfAbsent(target, Uint8Array.of(1)), OutputError);
     assert.deepEqual(await readdir(dir), ["salida.pdf"]);
   });
 });

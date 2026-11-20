@@ -3,7 +3,7 @@ import type { Messages } from "../i18n/Messages.ts";
 import type { BatchReport } from "./BatchDownloader.ts";
 import type { Logger } from "./ports.ts";
 
-/** Presenta el resultado de un lote y calcula el código de salida: 0 éxito, 3 sesión, 1 otros fallos. */
+/** Prints the download summary and determines the batch exit status. */
 export class ReportPrinter {
   private readonly logger: Logger;
   private readonly messages: Messages;

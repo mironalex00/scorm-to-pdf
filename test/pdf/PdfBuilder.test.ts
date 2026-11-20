@@ -1,23 +1,23 @@
 import { describe, it } from "node:test";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import assert from "node:assert/strict";
 import { PdfBuilder } from "../../src/pdf/PdfBuilder.ts";
 import { JpegInspector } from "../../src/pdf/JpegInspector.ts";
 import { ScormFormatError } from "../../src/domain/errors.ts";
 import { makeJpeg } from "../support/jpegFixtures.ts";
 
-const builder = new PdfBuilder({ messages: es, pageWidth: 200, pageHeight: 100, inspector: new JpegInspector({ messages: es }) });
+const builder = new PdfBuilder({ messages: en, pageWidth: 200, pageHeight: 100, inspector: new JpegInspector({ messages: en }) });
 
 function asText(pdf: Uint8Array): string {
   return Buffer.from(pdf).toString("latin1");
 }
 
 describe("PdfBuilder", () => {
-  it("se niega a construir un PDF sin páginas", () => {
-    assert.throws(() => builder.build([]), /No hay imágenes/);
+  it("rejects an empty page list", () => {
+    assert.throws(() => builder.build([]), /No images/);
   });
 
-  it("genera cabecera, una página por imagen y pie %%EOF", () => {
+  it("writes a PDF header, one page per image, and the end marker", () => {
     const pdf = asText(builder.build([makeJpeg({ width: 100, height: 100 }), makeJpeg({ width: 50, height: 50 })]));
     assert.ok(pdf.startsWith("%PDF-1.4\n"));
     assert.ok(pdf.endsWith("%%EOF\n"));
@@ -26,7 +26,7 @@ describe("PdfBuilder", () => {
     assert.equal(pdf.match(/\/MediaBox \[0 0 200 100\]/g)?.length, 2);
   });
 
-  it("el xref apunta con exactitud al inicio de cada objeto", () => {
+  it("records each object offset in the cross-reference table", () => {
     const pdf = asText(builder.build([makeJpeg({ width: 100, height: 100 }), makeJpeg({ width: 80, height: 40 })]));
     const xrefStart = Number(/startxref\n(\d+)\n%%EOF/.exec(pdf)![1]);
     assert.equal(pdf.slice(xrefStart, xrefStart + 4), "xref");
@@ -40,17 +40,17 @@ describe("PdfBuilder", () => {
     }
   });
 
-  it("escala sin deformar y centra: imagen cuadrada en página apaisada", () => {
+  it("centers and scales a square image on a landscape page", () => {
     const pdf = asText(builder.build([makeJpeg({ width: 100, height: 100 })]));
     assert.match(pdf, /\n100 0 0 100 50 0 cm\n/);
   });
 
-  it("escala sin deformar y centra: imagen muy ancha", () => {
+  it("centers and scales a wide image", () => {
     const pdf = asText(builder.build([makeJpeg({ width: 400, height: 100 })]));
     assert.match(pdf, /\n200 0 0 50 0 25 cm\n/);
   });
 
-  it("incrusta los bytes del JPEG sin recomprimir y declara DCTDecode y su longitud real", () => {
+  it("embeds the original JPEG bytes with the correct length and DCTDecode filter", () => {
     const jpeg = makeJpeg({ width: 100, height: 100, components: 1 });
     const pdf = builder.build([jpeg]);
     const text = asText(pdf);
@@ -59,16 +59,16 @@ describe("PdfBuilder", () => {
     assert.notEqual(Buffer.from(pdf).indexOf(jpeg), -1);
   });
 
-  it("la longitud declarada del flujo de contenido coincide con su tamaño", () => {
+  it("declares the correct length for the page content stream", () => {
     const text = asText(builder.build([makeJpeg({ width: 100, height: 100 })]));
     const match = /<< \/Length (\d+) >>\nstream\n([\s\S]*?)endstream/.exec(text)!;
     assert.equal(Number(match[1]), match[2]!.length);
   });
 
-  it("propaga el rechazo del inspector indicando qué diapositiva falla", () => {
+  it("reports the slide number when the JPEG inspector rejects an image", () => {
     assert.throws(
       () => builder.build([makeJpeg({ width: 10, height: 10 }), makeJpeg({ width: 10, height: 10, components: 4 })]),
-      (error: unknown) => error instanceof ScormFormatError && /diapositiva 2/.test(error.message),
+      (error: unknown) => error instanceof ScormFormatError && /Slide 2/.test(error.message),
     );
   });
 });

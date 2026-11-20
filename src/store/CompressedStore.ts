@@ -1,26 +1,36 @@
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { Redactor } from "../tracing/Redactor.ts";
 
-/**
- * Almacén en RAM que guarda cada valor como JSON comprimido con gzip: un catálogo grande ocupa
- * una fracción y solo se descomprime lo que se consulta. Los secretos se redactan antes de
- * comprimir, así que no pueden acabar almacenados aunque alguien los pase por error.
- */
+/** Stores redacted, gzip-compressed JSON in memory. Reads decompress a single entry. */
 export class CompressedStore<T> {
   private readonly redactor: Redactor;
   private readonly entries = new Map<string, Buffer>();
+  private readonly maxBytes: number;
+  private size = 0;
 
-  constructor(deps: { redactor: Redactor }) {
+  constructor(deps: { redactor: Redactor; maxBytes?: number }) {
     this.redactor = deps.redactor;
+    this.maxBytes = deps.maxBytes ?? Infinity;
   }
 
   set(key: string, value: T): void {
-    this.entries.set(key, gzipSync(this.redactor.redact(JSON.stringify(value))));
+    const packed = gzipSync(this.redactor.redact(JSON.stringify(value)));
+    this.delete(key);
+    if (packed.length > this.maxBytes) return;
+    while (this.size + packed.length > this.maxBytes) this.delete(this.entries.keys().next().value!);
+    // A small gzip result can retain the entire zlib output buffer.
+    const compact = Buffer.allocUnsafeSlow(packed.length);
+    packed.copy(compact);
+    this.entries.set(key, compact);
+    this.size += packed.length;
   }
 
   get(key: string): T | undefined {
     const packed = this.entries.get(key);
-    return packed === undefined ? undefined : (JSON.parse(gunzipSync(packed).toString("utf8")) as T);
+    if (packed === undefined) return undefined;
+    this.entries.delete(key);
+    this.entries.set(key, packed);
+    return JSON.parse(gunzipSync(packed).toString("utf8")) as T;
   }
 
   raw(key: string): Buffer | undefined {
@@ -32,21 +42,21 @@ export class CompressedStore<T> {
   }
 
   delete(key: string): void {
+    this.size -= this.entries.get(key)?.length ?? 0;
     this.entries.delete(key);
   }
 
   clear(): void {
     this.entries.clear();
+    this.size = 0;
   }
 
   keys(): string[] {
     return [...this.entries.keys()];
   }
 
-  /** Bytes que ocupan los datos comprimidos. */
+  /** Total size of the compressed entries. */
   bytes(): number {
-    let total = 0;
-    for (const packed of this.entries.values()) total += packed.length;
-    return total;
+    return this.size;
   }
 }

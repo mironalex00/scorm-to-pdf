@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import { NullTracer } from "../../src/tracing/NullTracer.ts";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import assert from "node:assert/strict";
 import { MoodleSession } from "../../src/application/MoodleSession.ts";
 import { ScormLocator } from "../../src/application/ScormLocator.ts";
@@ -21,15 +21,15 @@ interface Setup {
   logger: MemoryLogger;
 }
 
-/** Registra 404 para las revisiones 0..max y sustituye las indicadas por su respuesta. */
+/** Registers a 404 for each revision unless the test supplies a response. */
 function setup(overrides: Record<number, HttpResponse>, max = 12, entry = "index.html"): Setup {
   const http = new FakeHttpClient();
   for (let revision = 0; revision <= max; revision += 1) {
     http.on(entryUrl(revision, 10067, entry), overrides[revision] ?? statusResponse(404));
   }
   const logger = new MemoryLogger();
-  const session = new MoodleSession({ messages: es, tracer: new NullTracer(), http, cookie: SessionCookie.parse("abc", es), baseUrl: BASE });
-  return { http, logger, locator: new ScormLocator({ messages: es, session, logger, maxRevision: max, probeBatchSize: 3 }) };
+  const session = new MoodleSession({ messages: en, tracer: new NullTracer(), http, cookie: SessionCookie.parse("abc", en), baseUrl: BASE });
+  return { http, logger, locator: new ScormLocator({ messages: en, session, logger, maxRevision: max, probeBatchSize: 3 }) };
 }
 
 const request = { baseUrl: BASE, scormId: 10067, entry: "index.html", revision: undefined };
@@ -40,11 +40,11 @@ async function rejection(promise: Promise<unknown>): Promise<Error> {
   } catch (error) {
     return error as Error;
   }
-  throw new assert.AssertionError({ message: "se esperaba un rechazo" });
+  throw new assert.AssertionError({ message: "Expected the request to reject" });
 }
 
-describe("ScormLocator · revisión automática", () => {
-  it("acierta a la primera con la revisión 1 y no sondea más", async () => {
+describe("ScormLocator automatic revision lookup", () => {
+  it("stops after revision 1 when it resolves successfully", async () => {
     const { locator, http, logger } = setup({ 1: okResponse("<html>uno</html>") });
     const located = await locator.locate(request);
     assert.deepEqual([located.revision, located.html, located.entryUrl.href], [1, "<html>uno</html>", entryUrl(1)]);
@@ -52,16 +52,16 @@ describe("ScormLocator · revisión automática", () => {
     assert.deepEqual(logger.infos, []);
   });
 
-  it("si la 1 no existe, sondea por tandas y devuelve la encontrada", async () => {
+  it("probes in batches when revision 1 is missing", async () => {
     const { locator, http, logger } = setup({ 3: okResponse("tres") });
     const located = await locator.locate(request);
     assert.equal(located.revision, 3);
     assert.deepEqual(http.requestedUrls(), [1, 0, 2, 3].map((revision) => entryUrl(revision)));
     assert.equal(logger.infos.length, 1);
-    assert.match(logger.infos[0]!, /revisión/i);
+    assert.match(logger.infos[0]!, /revision/i);
   });
 
-  it("encuentra revisiones en tandas posteriores y no pide más allá de la tanda que acierta", async () => {
+  it("stops after finding a revision in a later batch", async () => {
     const { locator, http } = setup({ 5: okResponse("cinco") });
     assert.equal((await locator.locate(request)).revision, 5);
     const asked = http.requestedUrls();
@@ -69,24 +69,24 @@ describe("ScormLocator · revisión automática", () => {
     assert.ok(!asked.includes(entryUrl(7)));
   });
 
-  it("si varias revisiones de la misma tanda existen, gana la de menor orden de prueba", async () => {
+  it("uses the first successful result in probe order", async () => {
     const { locator } = setup({ 2: okResponse("dos"), 3: okResponse("tres") });
     assert.equal((await locator.locate(request)).revision, 2);
   });
 
-  it("prefiere un acierto a un fallo transitorio dentro de la misma tanda", async () => {
+  it("prefers a successful result to a transient failure in the same batch", async () => {
     const { locator } = setup({ 0: statusResponse(500), 2: okResponse("dos") });
     assert.equal((await locator.locate(request)).revision, 2);
   });
 
-  it("un fallo no 404 sin ningún acierto en la tanda se propaga", async () => {
+  it("propagates a non-404 error when no revision in the batch succeeds", async () => {
     const { locator } = setup({ 2: statusResponse(503) });
     const error = await rejection(locator.locate(request));
     assert.ok(error instanceof DownloadError);
     assert.match(error.message, /503/);
   });
 
-  it("si ninguna revisión existe, informa del rango probado y del ID", async () => {
+  it("reports the revision range and SCORM ID when no revision exists", async () => {
     const { locator, http } = setup({});
     const error = await rejection(locator.locate(request));
     assert.ok(error instanceof NotFoundError);
@@ -95,27 +95,27 @@ describe("ScormLocator · revisión automática", () => {
     assert.equal(http.requests.length, 13);
   });
 
-  it("un error de sesión en la primera petición corta de inmediato", async () => {
+  it("stops immediately when the first request fails authentication", async () => {
     const { locator, http } = setup({ 1: statusResponse(403) });
     assert.ok((await rejection(locator.locate(request))) instanceof AuthenticationError);
     assert.equal(http.requests.length, 1);
   });
 
-  it("un error de sesión durante el sondeo se propaga aunque otras peticiones den 404", async () => {
+  it("propagates an authentication error during a batch of missing revisions", async () => {
     const { locator } = setup({ 2: statusResponse(401) });
     assert.ok((await rejection(locator.locate(request))) instanceof AuthenticationError);
   });
 });
 
-describe("ScormLocator · revisión explícita y rutas", () => {
-  it("con revisión explícita pide solo esa, incluida la 0", async () => {
+describe("ScormLocator explicit revisions and entry paths", () => {
+  it("requests only the explicit revision, including revision zero", async () => {
     const { locator, http } = setup({ 0: okResponse("cero") });
     const located = await locator.locate({ ...request, revision: 0 });
     assert.equal(located.revision, 0);
     assert.deepEqual(http.requestedUrls(), [entryUrl(0)]);
   });
 
-  it("con revisión explícita inexistente falla sin sondear y sugiere quitar la opción", async () => {
+  it("reports a missing explicit revision without probing and suggests removing the option", async () => {
     const { locator, http } = setup({});
     const error = await rejection(locator.locate({ ...request, revision: 4 }));
     assert.ok(error instanceof NotFoundError);
@@ -123,12 +123,12 @@ describe("ScormLocator · revisión explícita y rutas", () => {
     assert.equal(http.requests.length, 1);
   });
 
-  it("una revisión explícita con un error distinto de 404 se propaga tal cual", async () => {
+  it("propagates a non-404 error for an explicit revision", async () => {
     const { locator } = setup({ 4: statusResponse(500) });
     assert.ok((await rejection(locator.locate({ ...request, revision: 4 }))) instanceof DownloadError);
   });
 
-  it("respeta el prefijo de instalación y las entradas en subcarpetas", async () => {
+  it("supports an installation path prefix and an entry in a subdirectory", async () => {
     const { locator } = setup({ 1: okResponse("ok") }, 12, "deck/start.html");
     const located = await locator.locate({ ...request, entry: "deck/start.html" });
     assert.equal(located.entryUrl.href, entryUrl(1, 10067, "deck/start.html"));

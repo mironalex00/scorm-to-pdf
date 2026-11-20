@@ -12,7 +12,7 @@ export interface ParsedCourses {
   readonly skipped: number;
 }
 
-/** Interpreta la respuesta JSON de lib/ajax/service.php; ante una forma inesperada falla con su huella. */
+/** Parses the Moodle course service response and reports its shape on failure. */
 export class CourseListParser {
   private readonly messages: Messages;
 
@@ -37,7 +37,7 @@ export class CourseListParser {
       data?: { courses?: unknown };
     };
     if (reply.error === true) {
-      throw this.serviceFailure(String(reply.exception?.errorcode ?? "desconocido"), String(reply.exception?.message ?? ""));
+      throw this.serviceFailure(String(reply.exception?.errorcode ?? "unknown"), String(reply.exception?.message ?? ""));
     }
     if (!Array.isArray(reply.data?.courses)) throw this.unexpected(json);
 

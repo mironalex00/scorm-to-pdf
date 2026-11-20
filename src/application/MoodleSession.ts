@@ -8,7 +8,7 @@ const MAX_REDIRECTS = 5;
 const MAX_TEXT_BYTES = 5 * 1024 * 1024;
 const REDIRECT_STATUSES: ReadonlySet<number> = new Set([301, 302, 303, 307, 308]);
 const LOGIN_PATH = /\/(?:login\/index\.php|auth\/\w+\/)/;
-const LOGIN_PAGE = /id=["']page-login-index["']|\bnotloggedin\b/;
+const LOGIN_PAGE = /<body\b[^>]*\b(?:id\s*=\s*["']page-login-index["']|class\s*=\s*["'][^"']*\bnotloggedin\b)/i;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36";
 const ACCEPT_HTML = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
@@ -33,35 +33,30 @@ export interface PostedJson {
   readonly status: number;
 }
 
-/**
- * Peticiones autenticadas contra un único origen de Moodle. Sigue las redirecciones a mano
- * para garantizar que la cookie nunca sale de ese origen, traduce el 200 «página de login»
- * (la trampa clásica de Moodle) en un AuthenticationError y deja traza de cada salto.
- */
+/** Sends authenticated requests to one Moodle origin and checks each redirect before following it. */
 export class MoodleSession {
   private readonly http: HttpClient;
   private readonly cookie: SessionCookie;
   private readonly origin: string;
   private readonly messages: Messages;
   private readonly tracer: Tracer;
+  private readonly signal: AbortSignal | undefined;
 
-  constructor(deps: { http: HttpClient; cookie: SessionCookie; baseUrl: URL; messages: Messages; tracer: Tracer }) {
+  constructor(deps: { http: HttpClient; cookie: SessionCookie; baseUrl: URL; messages: Messages; tracer: Tracer; signal?: AbortSignal | undefined }) {
     this.messages = deps.messages;
     this.tracer = deps.tracer;
     this.http = deps.http;
     this.cookie = deps.cookie;
     this.origin = deps.baseUrl.origin;
+    this.signal = deps.signal;
   }
 
-  /** `label` pide guardar una captura (redactada) de la página cuando la traza la admite. */
+  /** An optional label captures the redacted response when tracing is enabled. */
   async getText(url: URL, label?: string): Promise<FetchedText> {
     const { response, finalUrl } = await this.request(url, ACCEPT_HTML, MAX_TEXT_BYTES);
     const text = new TextDecoder("utf-8").decode(response.body);
     if (label !== undefined) this.tracer.snapshot(label, text, { path: finalUrl.pathname, status: response.status });
-    if (LOGIN_PAGE.test(text)) {
-      this.tracer.event("warn", "moodle.session", "login-page-detected", { path: finalUrl.pathname });
-      throw this.authenticationError();
-    }
+    this.assertAuthenticated(text, finalUrl);
     return { text, finalUrl };
   }
 
@@ -120,9 +115,11 @@ export class MoodleSession {
   }
 
   private async send(request: HttpRequest, hop: number): Promise<HttpResponse> {
+    this.signal?.throwIfAborted();
     const method = request.method ?? "GET";
-    const target = `${request.url.pathname}${request.url.search}`;
-    const response = await this.tracer.span(SCOPE, "request", { method, url: target, hop }, () => this.http.get(request));
+    const target = request.url.pathname;
+    const response = await this.tracer.span(SCOPE, "request", { method, url: target, hop }, () =>
+      this.http.get(this.signal ? { ...request, signal: this.signal } : request));
     this.tracer.event("debug", SCOPE, "response", {
       method,
       url: target,
@@ -130,7 +127,7 @@ export class MoodleSession {
       status: response.status,
       contentType: response.contentType,
       bytes: response.body.length,
-      location: response.location,
+      location: this.locationPath(response.location, request.url),
     });
     return response;
   }
@@ -140,10 +137,26 @@ export class MoodleSession {
   }
 
   private assertAllowed(url: URL): void {
-    if (url.origin !== this.origin) {
+    if (url.origin !== this.origin || url.username || url.password || !["http:", "https:"].includes(url.protocol)) {
       throw new DownloadError(this.messages.session.blockedOrigin({ origin: url.origin }));
     }
     if (LOGIN_PATH.test(url.pathname)) throw this.authenticationError();
+  }
+
+  assertAuthenticated(html: string, url: URL): void {
+    if (LOGIN_PAGE.test(html)) {
+      this.tracer.event("warn", "moodle.session", "login-page-detected", { path: url.pathname });
+      throw this.authenticationError();
+    }
+  }
+
+  private locationPath(location: string | undefined, from: URL): string | undefined {
+    if (!location) return undefined;
+    try {
+      return new URL(location, from).pathname;
+    } catch {
+      return undefined;
+    }
   }
 
   private resolveLocation(location: string | undefined, from: URL): URL {

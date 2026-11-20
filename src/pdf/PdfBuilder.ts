@@ -1,7 +1,7 @@
 import type { JpegInspector } from "./JpegInspector.ts";
 import type { Messages } from "../i18n/Messages.ts";
 
-/** Genera un PDF 1.4 con una página por JPEG, incrustado tal cual (DCTDecode). */
+/** Writes one page per JPEG and embeds each image using DCTDecode. */
 export class PdfBuilder {
   private readonly pageWidth: number;
   private readonly pageHeight: number;
@@ -38,7 +38,6 @@ export class PdfBuilder {
     const contentObject = pageObject + 1;
     const imageObject = pageObject + 2;
 
-    // Encaja la imagen en la página sin deformarla y la centra.
     const scale = Math.min(this.pageWidth / info.width, this.pageHeight / info.height);
     const drawWidth = info.width * scale;
     const drawHeight = info.height * scale;
@@ -58,16 +57,11 @@ export class PdfBuilder {
     writer.object(contentObject, `<< /Length ${content.length} >>\nstream\n${content}endstream`);
     writer.object(
       imageObject,
-      Buffer.concat([
-        Buffer.from(
-          `<< /Type /XObject /Subtype /Image /Width ${info.width} /Height ${info.height} ` +
-            `/ColorSpace ${info.colorSpace} /BitsPerComponent 8 /Filter /DCTDecode ` +
-            `/Length ${jpeg.length} >>\nstream\n`,
-          "latin1",
-        ),
-        jpeg,
-        Buffer.from("\nendstream", "latin1"),
-      ]),
+      `<< /Type /XObject /Subtype /Image /Width ${info.width} /Height ${info.height} ` +
+        `/ColorSpace ${info.colorSpace} /BitsPerComponent 8 /Filter /DCTDecode ` +
+        `/Length ${jpeg.length} >>\nstream\n`,
+      jpeg,
+      "\nendstream",
     );
   }
 
@@ -76,9 +70,9 @@ export class PdfBuilder {
   }
 }
 
-/** Acumula objetos PDF numerados y emite la tabla xref con los desplazamientos reales. */
+/** Tracks byte offsets for the PDF cross-reference table. */
 class PdfWriter {
-  private readonly chunks: Buffer[] = [];
+  private readonly chunks: Uint8Array[] = [];
   private readonly offsets: number[];
   private readonly objectCount: number;
   private position = 0;
@@ -92,10 +86,10 @@ class PdfWriter {
     this.append(Buffer.from("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n", "latin1"));
   }
 
-  object(number: number, body: string | Buffer): void {
+  object(number: number, ...parts: (string | Uint8Array)[]): void {
     this.offsets[number] = this.position;
     this.append(Buffer.from(`${number} 0 obj\n`, "latin1"));
-    this.append(typeof body === "string" ? Buffer.from(body, "latin1") : body);
+    for (const part of parts) this.append(typeof part === "string" ? Buffer.from(part, "latin1") : part);
     this.append(Buffer.from("\nendobj\n", "latin1"));
   }
 
@@ -112,10 +106,10 @@ class PdfWriter {
         "latin1",
       ),
     );
-    return Buffer.concat(this.chunks);
+    return Buffer.concat(this.chunks, this.position);
   }
 
-  private append(buffer: Buffer): void {
+  private append(buffer: Uint8Array): void {
     this.chunks.push(buffer);
     this.position += buffer.length;
   }

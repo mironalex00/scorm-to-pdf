@@ -8,16 +8,16 @@ const extractor = new SesskeyExtractor();
 describe("SesskeyExtractor", () => {
   const pages: Array<[string, string]> = [
     ["M.cfg", coursesPage()],
-    ["input oculto", `<input type="hidden" name="sesskey" value="${SESSKEY}">`],
-    ["enlace de cierre de sesión", `<a href="https://h/login/logout.php?sesskey=${SESSKEY}">Salir</a>`],
+    ["a hidden input", `<input type="hidden" name="sesskey" value="${SESSKEY}">`],
+    ["a sign-out link", `<a href="https://h/login/logout.php?sesskey=${SESSKEY}">Salir</a>`],
   ];
   for (const [name, html] of pages) {
-    it(`lo extrae de ${name}`, () => assert.equal(extractor.extract(html)?.reveal(), SESSKEY));
+    it(`extracts the session key from ${name}`, () => assert.equal(extractor.extract(html)?.reveal(), SESSKEY));
   }
 
-  it("devuelve undefined si no aparece", () => assert.equal(extractor.extract("<html></html>"), undefined));
+  it("returns undefined when the session key is absent", () => assert.equal(extractor.extract("<html></html>"), undefined));
 
-  it("el resultado no revela su valor al imprimirlo", () => {
+  it("hides the session key when printed", () => {
     assert.ok(!String(extractor.extract(coursesPage())).includes(SESSKEY));
   });
 });

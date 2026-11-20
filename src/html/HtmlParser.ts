@@ -2,7 +2,7 @@ const VOID_TAGS: ReadonlySet<string> = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr",
 ]);
 const RAW_TEXT_TAGS: ReadonlySet<string> = new Set(["script", "style"]);
-const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+const NAMED_ENTITIES = new Map([["amp", "&"], ["lt", "<"], ["gt", ">"], ["quot", '"'], ["apos", "'"], ["nbsp", " "]]);
 
 const CLOSE_TAG = /<\/([a-zA-Z][\w:-]*)\s*>/y;
 const OPEN_TAG = /<([a-zA-Z][\w:-]*)((?:\s+[^\s"'<>/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*(\/?)>/y;
@@ -10,7 +10,7 @@ const ATTRIBUTE = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)
 
 export function decodeEntities(text: string): string {
   return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (whole, body: string) => {
-    if (body[0] !== "#") return NAMED_ENTITIES[body.toLowerCase()] ?? whole;
+    if (body[0] !== "#") return NAMED_ENTITIES.get(body.toLowerCase()) ?? whole;
     const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
     return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
   });
@@ -27,51 +27,59 @@ export class HtmlElement {
   }
 
   attr(name: string): string | undefined {
-    return this.attrs[name];
+    return Object.hasOwn(this.attrs, name) ? this.attrs[name] : undefined;
   }
 
   hasClass(name: string): boolean {
     return (this.attrs.class ?? "").split(/\s+/).includes(name);
   }
 
-  /** Texto contenido, con los espacios colapsados. */
+  /** Returns descendant text with whitespace collapsed. */
   text(): string {
-    return this.rawText().replace(/\s+/g, " ").trim();
+    const text: string[] = [];
+    for (const node of this.descendants()) {
+      if (typeof node === "string") text.push(node);
+    }
+    return text.join("").replace(/\s+/g, " ").trim();
   }
 
-  /** Descendientes que cumplen el predicado, en orden de documento (sin incluir el propio elemento). */
+  /** Returns matching descendants in document order. */
   findAll(predicate: (element: HtmlElement) => boolean): HtmlElement[] {
     const found: HtmlElement[] = [];
-    this.walk(predicate, found);
+    for (const node of this.descendants()) {
+      if (typeof node !== "string" && predicate(node)) found.push(node);
+    }
     return found;
   }
 
   find(predicate: (element: HtmlElement) => boolean): HtmlElement | undefined {
-    return this.findAll(predicate)[0];
+    for (const node of this.descendants()) {
+      if (typeof node !== "string" && predicate(node)) return node;
+    }
+    return undefined;
   }
 
-  private rawText(): string {
-    return this.children.map((child) => (typeof child === "string" ? child : child.rawText())).join("");
-  }
-
-  private walk(predicate: (element: HtmlElement) => boolean, into: HtmlElement[]): void {
-    for (const child of this.children) {
-      if (typeof child === "string") continue;
-      if (predicate(child)) into.push(child);
-      child.walk(predicate, into);
+  private *descendants(): Generator<HtmlElement | string> {
+    const path = [this.children[Symbol.iterator]()];
+    while (path.length > 0) {
+      const next = path.at(-1)!.next();
+      if (next.done) {
+        path.pop();
+        continue;
+      }
+      const node = next.value;
+      yield node;
+      if (typeof node !== "string" && node.children.length > 0) path.push(node.children[Symbol.iterator]());
     }
   }
 }
 
-/**
- * Lector de HTML tolerante y sin dependencias: suficiente para extraer datos de páginas de Moodle,
- * no un navegador. No aplica reglas de cierre implícito; recupera los cierres desajustados.
- */
+/** Reads Moodle markup with explicit tag boundaries and recovers from mismatched closing tags. */
 export class HtmlParser {
   parse(html: string): HtmlElement {
     const root = new HtmlElement("#root", {});
     const stack: HtmlElement[] = [root];
-    const lower = html.toLowerCase();
+    const openPositions = new Map<string, number[]>();
     let index = 0;
 
     const top = (): HtmlElement => stack[stack.length - 1]!;
@@ -103,8 +111,10 @@ export class HtmlParser {
       const close = CLOSE_TAG.exec(html);
       if (close) {
         const tag = close[1]!.toLowerCase();
-        const position = stack.map((element) => element.tag).lastIndexOf(tag);
-        if (position > 0) stack.length = position;
+        const position = openPositions.get(tag)?.at(-1);
+        if (position !== undefined) {
+          while (stack.length > position) openPositions.get(stack.pop()!.tag)!.pop();
+        }
         index = CLOSE_TAG.lastIndex;
         continue;
       }
@@ -122,21 +132,27 @@ export class HtmlParser {
       index = OPEN_TAG.lastIndex;
 
       if (RAW_TEXT_TAGS.has(tag) && open[3] !== "/") {
-        const end = lower.indexOf(`</${tag}`, index);
-        index = end === -1 ? html.length : end;
+        const endTag = new RegExp(`</${tag}\\s*>`, "gi");
+        endTag.lastIndex = index;
+        index = endTag.exec(html) ? endTag.lastIndex : html.length;
         continue;
       }
-      if (!VOID_TAGS.has(tag) && open[3] !== "/") stack.push(element);
+      if (!VOID_TAGS.has(tag) && open[3] !== "/") {
+        const positions = openPositions.get(tag);
+        if (positions) positions.push(stack.length);
+        else openPositions.set(tag, [stack.length]);
+        stack.push(element);
+      }
     }
     return root;
   }
 
   private parseAttributes(source: string): Record<string, string> {
-    const attrs: Record<string, string> = {};
+    const attrs: Record<string, string> = Object.create(null);
     for (const match of source.matchAll(ATTRIBUTE)) {
       const value = match[2] ?? match[3] ?? match[4] ?? "";
       attrs[match[1]!.toLowerCase()] = decodeEntities(value);
     }
-    return attrs;
+    return { ...attrs };
   }
 }

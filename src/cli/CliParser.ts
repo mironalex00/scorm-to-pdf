@@ -1,3 +1,4 @@
+import { parseMoodleBaseUrl } from "../application/MoodleUrl.ts";
 import { UsageError } from "../domain/errors.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { CliCommand, CommonOptions, GlobalOptions, ScormOptions } from "./commands.ts";
@@ -15,10 +16,9 @@ interface TargetHints {
 }
 
 const MAX_SCORM_ID = 2_147_483_647;
-const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const PLUGINFILE_PATH = /^(.*)\/pluginfile\.php\/(\d+)\/mod_scorm\/content\/(\d+)\/(.+)$/;
 
-/** Para elegir la orden basta con saber qué opciones consumen un valor. */
+/** Command detection only needs to know which options consume values. */
 const PEEK_SPECS: readonly OptionSpec[] = [
   ...GLOBAL_OPTIONS,
   ...Object.values(COMMAND_OPTIONS).flat(),
@@ -27,7 +27,7 @@ const PEEK_SPECS: readonly OptionSpec[] = [
     ? { ...spec, short: undefined }
     : spec);
 
-/** Convierte argv en una orden validada. Nunca toca el proceso ni el sistema de archivos. */
+/** Parses arguments without performing I/O. */
 export class CliParser {
   private readonly version: string;
   private readonly env: Readonly<Record<string, string | undefined>>;
@@ -213,7 +213,7 @@ export class CliParser {
       throw new UsageError(this.messages.cli.notIdNorUrl({ raw }));
     }
     const match = PLUGINFILE_PATH.exec(url.pathname);
-    if (!match) throw new UsageError(this.messages.cli.badPluginfileUrl({ raw }));
+    if (!match) throw new UsageError(this.messages.cli.badPluginfileUrl({ raw: url.origin + url.pathname }));
     return {
       scormId: this.parseScormId(match[2]!),
       baseUrl: `${url.origin}${match[1]}`,
@@ -265,17 +265,6 @@ export class CliParser {
   }
 
   private parseBaseUrl(raw: string, source: string): URL {
-    let url: URL;
-    try {
-      url = new URL(raw);
-    } catch {
-      throw new UsageError(this.messages.cli.baseUrlInvalid({ source, raw }));
-    }
-    const secure = url.protocol === "https:" || (url.protocol === "http:" && LOCAL_HOSTS.has(url.hostname));
-    if (!secure) throw new UsageError(this.messages.cli.baseUrlInsecure({ source, raw }));
-    url.search = "";
-    url.hash = "";
-    url.pathname = `${url.pathname.replace(/\/+$/, "")}/`;
-    return url;
+    return parseMoodleBaseUrl(raw, source, this.messages);
   }
 }

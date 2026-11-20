@@ -1,10 +1,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 
 type Leaf = (params: Record<string, string>) => string | string[];
 
-/** Parámetros espía: cualquier propiedad devuelve su propio nombre, para ejecutar cada mensaje. */
+// Give each message parameter a visible placeholder.
 const spy = new Proxy({}, { get: (_target, name) => `<${String(name)}>` }) as Record<string, string>;
 
 function collect(node: unknown, path: string[] = []): Array<{ path: string; leaf: Leaf | string }> {
@@ -12,23 +12,25 @@ function collect(node: unknown, path: string[] = []): Array<{ path: string; leaf
   return Object.entries(node as Record<string, unknown>).flatMap(([key, value]) => collect(value, [...path, key]));
 }
 
-describe("catálogo es", () => {
-  const entries = collect(es);
+describe("English message catalog", () => {
+  const entries = collect(en);
 
-  it("declara su identificador de idioma", () => {
-    assert.equal(es.locale, "es");
+  it("declares its locale identifier", () => {
+    assert.equal(en.locale, "en");
   });
 
-  it("tiene mensajes y cada uno produce un texto no vacío con parámetros espía", () => {
-    assert.ok(entries.length > 30, `solo ${entries.length} entradas`);
+  it("renders every message as plain ASCII, with the Romanian farewell", () => {
+    assert.ok(entries.length > 30, `Expected more than 30 entries, got ${entries.length}`);
     for (const { path, leaf } of entries) {
       const produced = typeof leaf === "function" ? leaf(spy) : leaf;
       const text = Array.isArray(produced) ? produced.join("\n") : produced;
-      assert.ok(text.trim().length > 0, `mensaje vacío: ${path}`);
+      assert.ok(text.trim().length > 0, `Empty message: ${path}`);
+      if (path === "tui.farewell") assert.equal(text, "Mulțumesc!");
+      else assert.match(text, /^[\n -~]+$/, `Non-ASCII message: ${path}`);
     }
   });
 
-  it("los mensajes con parámetros los incorporan al texto", () => {
+  it("includes interpolated parameters in the message text", () => {
     const withParams = entries.filter(({ leaf }) => typeof leaf === "function" && String(leaf(spy)).includes("<"));
     assert.ok(withParams.length > 20);
   });

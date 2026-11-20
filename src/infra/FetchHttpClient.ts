@@ -2,10 +2,7 @@ import { DownloadError } from "../domain/errors.ts";
 import type { HttpClient, HttpRequest, HttpResponse } from "../application/ports.ts";
 import type { Messages } from "../i18n/Messages.ts";
 
-/**
- * Adaptador de `fetch`. No sigue redirecciones (lo hace MoodleSession, que controla el origen),
- * limita el tiempo total y el tamaño del cuerpo, y marca como reintentables los fallos de red.
- */
+/** Caps request time and response size. Callers handle redirects and retries. */
 export class FetchHttpClient implements HttpClient {
   private readonly timeoutMs: number;
   private readonly messages: Messages;
@@ -48,25 +45,42 @@ export class FetchHttpClient implements HttpClient {
   private async readBody(response: Response, request: HttpRequest): Promise<Uint8Array> {
     if (!response.body) return new Uint8Array();
 
-    if (Number(response.headers.get("content-length")) > request.maxBytes) {
-      await response.body.cancel();
+    const declared = Number(response.headers.get("content-length"));
+    const encoding = response.headers.get("content-encoding")?.toLowerCase();
+    const knownLength = Number.isSafeInteger(declared) && declared > 0 && (!encoding || encoding === "identity");
+    if (knownLength && declared > request.maxBytes) {
+      await response.body.cancel().catch(() => undefined);
       throw this.tooLarge(request);
     }
 
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
+    let contiguous: Uint8Array | undefined;
     let total = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.length;
-      if (total > request.maxBytes) {
-        await reader.cancel();
-        throw this.tooLarge(request);
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const end = total + value.length;
+        if (end > request.maxBytes) throw this.tooLarge(request);
+        if (knownLength && end <= declared && chunks.length === 0) {
+          contiguous ??= new Uint8Array(declared);
+          contiguous.set(value, total);
+        } else {
+          if (contiguous) chunks.push(contiguous.subarray(0, total));
+          contiguous = undefined;
+          chunks.push(value);
+        }
+        total = end;
       }
-      chunks.push(value);
+      if (contiguous) return contiguous.subarray(0, total);
+      return chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks, total);
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
+    } finally {
+      reader.releaseLock();
     }
-    return Buffer.concat(chunks);
   }
 
   private tooLarge(request: HttpRequest): DownloadError {

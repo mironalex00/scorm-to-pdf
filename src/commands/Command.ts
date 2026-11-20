@@ -1,4 +1,4 @@
-/** Una orden de la CLI ya construida con sus dependencias; devuelve el código de salida. */
+/** An initialized CLI command that returns an exit status. */
 export interface Command {
   run(): Promise<number>;
 }

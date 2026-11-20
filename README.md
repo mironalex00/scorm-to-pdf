@@ -1,87 +1,63 @@
 # scorm-to-pdf
 
-Descarga el material de tus cursos de Moodle ordenado por semanas. Los archivos directos se guardan tal cual; los SCORM de diapositivas se convierten a PDF. La descarga de Moodle y sus animaciones funcionan con Node o Bun.
+Download files and SCORM slide decks from Moodle. The interactive selector can collect materials from several courses in one run. Direct downloads keep their original format, and JPEG slide decks become PDFs.
 
-```sh
-export MOODLE_COOKIE='...'      # o en un archivo .env (Bun lo carga solo); si falta, el selector la pide
-bun src/main.ts                 # selector interactivo
-```
+## Getting started
 
-Sin Bun: `node src/main.ts` (Node 22.18 o posterior; en 22.6–22.17 añade `--experimental-strip-types`).
+Use Node.js 22.18 or later, or Bun. Install dependencies with `npm ci` or `bun install --frozen-lockfile`. Start the interactive selector in a terminal.
 
-## Órdenes
+~~~sh
+node src/main.ts
+~~~
 
-| Orden | Qué hace |
+If the Moodle session cookie is missing, the selector prompts for it with input hidden. For scripted commands, set `MOODLE_COOKIE` to the complete Cookie header, a name-value pair, or the bare MoodleSession value. Bun loads a local `.env` file automatically. Keep this file private and out of version control.
+
+## Commands
+
+| Command | Action |
 | --- | --- |
-| *(ninguna, en una terminal)* | Selector de uno o varios cursos → contenidos de cada curso → confirmación → destino |
-| `courses [--json]` | Lista tus cursos |
-| `items <curso> [--json]` | Semanas y contenidos de un curso (`<curso>` es el id o parte del nombre) |
-| `get <curso> --all \| --week 1,3 \| --item 501,512 [--dest carpeta]` | Descarga una selección |
-| `<id \| URL>` | Convierte un SCORM de diapositivas en PDF (la orden original, intacta) |
-| `diagnose` | Recorre la cadena completa contra tu Moodle y guarda una traza |
-| `ascii <entrada>` | Convierte imágenes, GIF y vídeos a ASCII |
+| No command in a terminal | Select courses, select materials, then choose a destination. |
+| `courses [--json]` | List enrolled courses. |
+| `items <course> [--json]` | List the sections and downloadable materials in a course. Use its ID or part of its name. |
+| `get <course> --all [--dest <path>]` | Download a course. Use `--week 1,3` or `--item 501,512` to select individual sections or materials. |
+| `<SCORM ID or pluginfile URL>` | Convert one SCORM slide deck to PDF. |
+| `diagnose` | Check course listings, course contents, and sample resource and SCORM downloads. Save a trace. |
+| `ascii <input>` | Convert an image, GIF, or video to ASCII. See the [ASCII extension](src/extensions/ascii/README.md). |
 
-Opciones generales: `--platform`, `--base-url`, `--lang`, `-c/--concurrency`, `--trace`, `--trace-dir`, `-q`, `-h`, `-v`. `--help` muestra todo. Códigos de salida: `0` éxito, `1` error o descargas fallidas, `2` uso incorrecto, `3` sesión no válida, `130` cancelado.
+Run `node src/main.ts --help` for options. Exit status is 0 for success, 1 for an operation that failed, 2 for invalid usage, and 3 when Moodle rejects the session. Cancel with Ctrl+C to exit with status 130.
 
-**Selector:** `↑↓` mueve el cursor, `Espacio` marca cursos o contenidos, `A` marca todo y `Enter` continúa. Si no has marcado ningún curso, `Enter` abre el que tiene el cursor. En los contenidos, `a` marca una sección. `Esc` vuelve un paso y conserva las marcas de cada curso durante la sesión. Un curso con materiales elegidos aparece marcado y la confirmación reúne los materiales de todos los cursos. Desmarcar un curso en la lista quita sus materiales de la selección. `Ctrl+C` cancela. Al completar la descarga, una pantalla de despedida muestra un agradecimiento en rumano y un oso animado con un aro antes de devolver el control a la terminal.
+## Interactive selection and files
 
-**Destino:** el selector guarda en `<destino>/content/<curso>/<título de sección>/<nombre del material>/<archivo>`, incluso si eliges un solo curso. `get` guarda en `<destino>/<título de sección>/<archivo>`. Cuando una sección carece de título, se usa su número. Si dos nombres de carpeta coinciden después de quitar caracteres incompatibles, se distinguen con sufijos como `(2)`. Si el destino ya contiene un archivo, se omite.
+Use the arrow keys to move, Space to toggle a course or item, A to toggle all, and Enter to advance. Press lowercase a on the materials screen to toggle the current section. Esc goes back and preserves selections for the current session. The review screen includes materials selected in every course. Clearing a course from the course list removes its selected materials.
 
-## Motor ASCII
+The selector saves files as `<destination>/content/<course>/<section>/<material>/<file>`, including when only one course is selected. The `get` command writes directly to `<destination>/<section>/<file>`. Sections without titles use their numeric index. Colliding names receive suffixes such as `(2)`.
 
-Ejecuta `node src/main.ts ascii foto.png --invert -w 48` o consulta `ascii --help`. La [extensión ASCII](src/extensions/ascii/README.md) admite texto, reproducción en terminal, HTML, JSON, imágenes y vídeo. Prepara FFmpeg y FFprobe en un directorio temporal por ejecución. La TUI reproduce los cuadros generados desde los PNG de referencia con ese mismo motor.
+Course downloads keep existing files. They publish each completed file from a private staging directory using a hard link, so the destination filesystem must support hard links. Use a destination you control. The standalone SCORM and ASCII commands can replace the explicit output file.
 
-## Cuando algo falla (trazabilidad)
+## Moodle settings
 
-La herramienta se diseñó para depurarse sin acceso a tu Moodle. Cada operación deja un evento con **cuándo** (marca de tiempo y duración), **dónde** (ámbito y contenido afectado) y **cómo** (cadena de causas y la forma de la respuesta recibida, sin sus valores).
+The default installation is `ro.utcluj.kb`. Select another Moodle site with `--platform https://campus.example.org` or `--base-url https://campus.example.org/moodle/`. Remote Moodle sites require HTTPS. HTTP is available for loopback addresses used in development. `SCORM_PLATFORM` and `MOODLE_BASE_URL` provide equivalent environment settings.
 
-1. `bun src/main.ts diagnose` prueba cursos, contenido, un recurso y un SCORM, marca cada paso y guarda la traza.
-2. Con cualquier orden, `--trace` guarda la traza completa y capturas **redactadas** de las páginas clave (`scorm-trace-<id>/trace.jsonl` y `snapshots/`).
-3. Sin `--trace`, un fallo real deja igualmente los últimos eventos y te dice dónde.
+Moodle installation profiles live under [src/extensions](src/extensions). The registry uses the standard Moodle adapter for hosts without a profile. English is the bundled CLI language. Use `--lang en` or `SCORM_LANG=en` to select it explicitly.
 
-Antes de enviar una traza, revísala: se eliminan la cookie, el sesskey, tokens y correos, pero los nombres de curso y de persona que salgan en las páginas no se pueden detectar de forma fiable.
+## Diagnostics and cleanup
 
-## Plataformas y extensiones
+Use `--trace`, `SCORM_TRACE=1`, `--trace-dir <path>`, or `diagnose` to save diagnostic events and selected response snapshots. The default path is `scorm-trace-<id>/`. Trace files are created with owner-only permissions on Unix-like systems. Common credentials are redacted, but snapshots can still contain course names, personal information, and fields specific to a Moodle installation. Review them before sharing.
 
-Todo lo que se usa (`my/courses.php`, `lib/ajax/service.php`, el índice del curso, `mod/resource`, `mod/scorm`, `loadSCO.php`) es Moodle estándar. Por eso solo hay un adaptador (`src/platforms/moodle`) y cada **extensión de Moodle** es configuración, identificada con un nombre de paquete en dominio inverso y ubicada en la ruta equivalente: `ro.utcluj.kb` → `src/extensions/ro/utcluj/kb/`. El registro es una lista estática; nada se carga en tiempo de ejecución.
+Course catalog data is cached in memory for one command. Output staging directories and extracted codec executables are removed on completion, recoverable errors, and handled interrupts. Completed output files remain after cancellation. Filesystem errors, a power loss, or a forced kill can leave an empty output directory or a private staging directory. The ASCII extension keeps verified ZIP archives for offline use.
 
-`--platform ro.utcluj.kb` elige una extensión; `--platform https://campus.example.org` o `--base-url` eligen por host y, si no hay extensión, usan Moodle estándar. `MOODLE_BASE_URL` sigue funcionando como alias. Equivalentes de entorno: `SCORM_PLATFORM`, `SCORM_LANG`, `SCORM_TRACE=1`.
+## Development
 
-## Idiomas
-
-Todos los textos visibles viven en un catálogo tipado (`src/i18n/es.ts`, que implementa la interfaz `Messages`). Para añadir un idioma se crea otro archivo que implemente esa interfaz —el compilador rechaza un catálogo incompleto— y se registra en `CliApplication`. Se elige con `--lang`, `SCORM_LANG` o `LANG`.
-
-## Memoria y secretos
-
-El catálogo se guarda **comprimido (gzip) y solo en RAM**; cada curso se pide al entrar en él y se descomprime únicamente lo que se consulta. Nada se persiste. La cookie y el sesskey viven en valores que no se imprimen ni se serializan, y todo lo que se almacena o se traza pasa antes por el redactor.
-
-## Estructura
-
-| Carpeta | Contenido |
-| --- | --- |
-| `src/cli` | `CliParser` multiorden, `OptionCollector`, `HelpFormatter` (generada desde el catálogo) |
-| `src/commands` | Una clase por orden |
-| `src/application` | Servicios: `CatalogService`, `BatchDownloader`, `ItemDownloader`, `SlidesToPdf`, `FileNamer`, `NamePlanner`… y los puertos (`ports.ts`) |
-| `src/platforms/moodle` | Adaptador de Moodle: lista de cursos, índice, recursos, SCORM |
-| `src/extensions` | Extensiones por paquete y su registro |
-| `src/tui` | Terminal real, pantallas puras y orquestación del selector |
-| `src/tracing`, `src/store`, `src/html`, `src/i18n`, `src/pdf`, `src/infra` | Trazas, almacén comprimido, lector de HTML, idiomas, PDF y adaptadores |
-| `src/composition`, `src/CliApplication.ts` | Raíz de composición: el único sitio que instancia clases concretas |
-
-## Desarrollo
-
-Usa `npm ci` o `bun install` para instalar las herramientas de desarrollo y el descompresor que usa `ascii`. `npm run ascii:prepare` prepara la caché de los códecs y `npm run ascii:art` regenera los cuadros de la TUI.
-
-```sh
-npm install
-npm test               # node:test; también con `bun test`
+~~~sh
+npm ci
 npm run typecheck
-npm run coverage       # exige 100 % de líneas, ramas y funciones
-```
+npm test
+npm run ascii:prepare
+SCORM_ASCII_TEST=1 npm run coverage
+~~~
 
-## Límites conocidos
+The suite uses synthetic Moodle data and starts a loopback HTTP server. Set `SCORM_ASCII_TEST=1` after preparing the codec cache to require media integration tests. The coverage command checks 99% lines, 97% branches, and 99% functions. The main code is under [src](src), with tests under [test](test).
 
-- Las respuestas de Moodle se reconstruyeron a partir de lo observado en DevTools y de Moodle 4.x estándar, **sin acceso a la instalación real**: los fixtures de `test/fixtures` son sintéticos. Si algo no encaja, `diagnose` y `--trace` indican qué forma llegó.
-- El selector se probó en Linux (Node y Bun, con un pseudo-terminal real). macOS debería comportarse igual; Windows no está verificado.
-- Durante la descarga el selector no es interrumpible.
-- Solo recursos y SCORM; solo SCORM de diapositivas en JPEG (gris o RGB); 25 MiB por imagen y 200 MiB por archivo.
+With Bun installed, `npm run build` produces a standalone executable in `dist/` and removes the compiler's staging files.
+
+The converter supports Moodle file resources and SCORM slide decks with grayscale or RGB JPEGs. A file can be up to 200 MiB, an individual slide up to 25 MiB, and the slides in one deck up to 128 MiB combined.

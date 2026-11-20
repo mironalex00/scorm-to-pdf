@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import type { HttpClient } from "../../application/ports.ts";
 import { OutputError, UsageError } from "../../domain/errors.ts";
 import type { Messages } from "../../i18n/Messages.ts";
-import { es } from "../../i18n/es.ts";
+import { en } from "../../i18n/en.ts";
 import { FetchHttpClient } from "../../infra/FetchHttpClient.ts";
 import { NodeFileSink } from "../../infra/NodeFileSink.ts";
 
@@ -45,7 +45,7 @@ interface Build {
   readonly ffprobe: string;
 }
 
-/** Los SHA-256 corresponden a los ZIP publicados, no a descargas de una etiqueta latest. */
+/** Checksums for the archives at the pinned release URLs. */
 const BUILDS: Readonly<Record<string, Build | undefined>> = {
   "darwin-arm64": {
     directory: "macos/arm64/1789931890_9.0.2",
@@ -73,7 +73,7 @@ function digest(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
-/** Conserva únicamente los ZIP verificados. Cada operación extrae y elimina su propio par. */
+/** Caches verified ZIPs and extracts a private pair of tools for each operation. */
 export class PortableMediaRuntime implements MediaRuntime {
   private readonly cache: string;
   private readonly messages: Messages;
@@ -88,7 +88,7 @@ export class PortableMediaRuntime implements MediaRuntime {
     http?: HttpClient;
   } = {}) {
     const env = deps.env ?? process.env;
-    this.messages = deps.messages ?? es;
+    this.messages = deps.messages ?? en;
     this.http = deps.http ?? new FetchHttpClient({ messages: this.messages, timeoutMs: 120_000 });
     this.sink = new NodeFileSink({ messages: this.messages });
     this.target = process.platform + "-" + process.arch;
@@ -147,7 +147,7 @@ export class PortableMediaRuntime implements MediaRuntime {
     if (digest(response.body) !== build[name]) throw new OutputError(this.messages.ascii.invalidArchive({ tool: name }));
 
     await mkdir(this.cache, { recursive: true, mode: 0o700 });
-    await this.sink.write(file, response.body);
+    await this.sink.write(file, response.body, signal);
     return response.body;
   }
 

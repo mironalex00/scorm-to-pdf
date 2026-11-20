@@ -19,7 +19,7 @@ export const CLI_DEFAULTS = {
   dest: ".",
 } as const;
 
-/** Opciones que admiten todas las órdenes. */
+/** Options shared by all commands. */
 export const GLOBAL_OPTIONS: readonly OptionSpec[] = [
   { name: "platform", kind: "string", valueKind: "platform" },
   { name: "base-url", kind: "string", valueKind: "url" },
@@ -72,7 +72,7 @@ export const ASCII_OPTIONS: readonly OptionSpec[] = [
   { name: "mute", kind: "boolean" },
 ];
 
-/** Opciones propias de cada orden, además de las generales. */
+/** Options declared by each command. */
 export const COMMAND_OPTIONS: Readonly<Record<CommandName, readonly OptionSpec[]>> = {
   scorm: SCORM_OPTIONS,
   courses: LIST_OPTIONS,

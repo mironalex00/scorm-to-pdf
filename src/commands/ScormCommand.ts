@@ -5,7 +5,7 @@ import type { Command } from "./Command.ts";
 
 const MIB = 1024 * 1024;
 
-/** Orden heredada: convierte en PDF el SCORM de diapositivas cuyo ID se indica. */
+/** Converts the slides in a single SCORM module into a PDF. */
 export class ScormCommand implements Command {
   private readonly convert: ConvertScormToPdf;
   private readonly request: ConversionRequest;

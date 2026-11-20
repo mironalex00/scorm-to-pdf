@@ -5,22 +5,23 @@ import { TuiLogger } from "../../src/tui/TuiLogger.ts";
 import { MemoryLogger } from "../support/fakes.ts";
 
 describe("TuiLogger", () => {
-  it("guarda los avisos, ignora info y resultados y reenvía el progreso a quien lo escuche", () => {
+  it("forwards progress only while a listener is attached", () => {
     const logger = new TuiLogger();
     const seen: string[] = [];
     logger.progress({ done: 0, total: 1, label: "sin oyente" });
     logger.onProgress((update) => seen.push(update.label));
     logger.info("x");
     logger.result("y");
-    logger.warn("cuidado");
+    logger.warn("watch out");
     logger.progress({ done: 1, total: 1, label: "uno" });
+    logger.onProgress(undefined);
+    logger.progress({ done: 1, total: 1, label: "detached" });
     assert.deepEqual(seen, ["uno"]);
-    assert.deepEqual(logger.warnings, ["cuidado"]);
   });
 });
 
 describe("QuietLogger", () => {
-  it("solo deja pasar los avisos al registrador interior", () => {
+  it("forwards warnings to the wrapped logger", () => {
     const inner = new MemoryLogger();
     const quiet = new QuietLogger({ inner });
     quiet.info("a");

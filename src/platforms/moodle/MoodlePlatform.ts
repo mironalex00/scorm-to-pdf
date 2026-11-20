@@ -16,7 +16,7 @@ export interface ItemFetcher {
   fetch(item: CourseItem): Promise<FetchedItem>;
 }
 
-/** Adaptador de Moodle estándar (4.x). Lo específico de cada instalación vive en su MoodleProfile. */
+/** Moodle 4.x adapter with per-installation settings in MoodleProfile. */
 export class MoodlePlatform implements LearningPlatform {
   readonly id: string;
   private readonly profile: MoodleProfile;
@@ -89,12 +89,12 @@ export class MoodlePlatform implements LearningPlatform {
           this.tracer.event("info", SCOPE, "contents.attempt", { path: template, outcome, ...stats });
           if (outcome === "ok") return contents;
           if (contents.sections.length > 0) emptyCourse ??= contents;
-          attempts.push(`${template} → ${outcome}`);
+          attempts.push(`${template} (${outcome})`);
         } catch (error) {
           if (error instanceof AuthenticationError) throw error;
           const detail = (error as Error).message;
           this.tracer.event("warn", SCOPE, "contents.attempt", { path: template, outcome: "error", detail });
-          attempts.push(`${template} → error: ${detail}`);
+          attempts.push(`${template} (${detail})`);
         }
       }
       if (emptyCourse !== undefined) return emptyCourse;
