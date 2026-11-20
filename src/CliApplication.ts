@@ -182,6 +182,7 @@ export class CliApplication {
             terminal: this.terminal!,
             catalog,
             batch: services.batch,
+            namer: services.namer,
             logger: context.tuiLogger!,
             printer: services.printer,
             messages,

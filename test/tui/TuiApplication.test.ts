@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { BatchReport } from "../../src/application/BatchDownloader.ts";
 import { CatalogService } from "../../src/application/CatalogService.ts";
+import { FileNamer } from "../../src/application/FileNamer.ts";
 import type { ItemOutcome } from "../../src/application/ItemDownloader.ts";
 import { ReportPrinter } from "../../src/application/ReportPrinter.ts";
 import { AuthenticationError, DownloadError } from "../../src/domain/errors.ts";
@@ -23,14 +24,14 @@ import { CapturedStream } from "../support/streams.ts";
 const item = (id: string, name: string, sectionNumber: number, kind: "resource" | "scorm" = "resource"): CourseItem => ({ id, kind, name, url: "u", sectionNumber });
 const alfa: CourseContents = { sections: [{ number: 3, title: "Tres" }, { number: 1, title: "Uno" }], items: [item("a", "Tema A", 1), item("b", "Tema B", 1, "scorm"), item("c", "Tema C", 3)] };
 
-function make(keys: KeyPress[], options: { contents?: Record<string, CourseContents | Error>; report?: (items: readonly CourseItem[], logger: TuiLogger) => BatchReport | Promise<BatchReport>; courses?: Array<{ id: string; name: string }> } = {}) {
+function make(keys: KeyPress[], options: { contents?: Record<string, CourseContents | Error>; report?: (items: readonly CourseItem[], logger: TuiLogger) => BatchReport | Promise<BatchReport>; courses?: Array<{ id: string; name: string }>; animate?: boolean } = {}) {
   const platform = new FakePlatform();
   platform.courses = options.courses ?? [{ id: "2", name: "Beta" }, { id: "1", name: "Alfa" }];
   platform.contents = options.contents ?? { "1": alfa, "2": { sections: [], items: [] } };
   const catalog = new CatalogService({ platform, store: new CompressedStore({ redactor: new Redactor() }), locale: "es", tracer: new NullTracer() });
   const terminal = new ScriptedTerminal(keys);
   const logger = new TuiLogger();
-  const stdout = new CapturedStream();
+  const stdout = new CapturedStream(options.animate);
   const stderr = new CapturedStream();
   const calls: Array<{ items: string[]; dest: string }> = [];
   const batch = {
@@ -41,6 +42,7 @@ function make(keys: KeyPress[], options: { contents?: Record<string, CourseConte
   };
   const app = new TuiApplication({
     terminal, catalog, batch, logger, messages: es, stdout, stderr, cwd: "carpeta-actual",
+    namer: new FileNamer({ fallbackName: "archivo", maxNameBytes: 100 }),
     printer: new ReportPrinter({ logger: new MemoryLogger(), messages: es }),
     layout: new FrameLayout({ colors: false }),
   });
@@ -57,18 +59,18 @@ describe("TuiApplication · camino feliz", () => {
       key("enter"), key("enter"), key("enter"), // continuar, confirmar, carpeta actual
     ]);
     assert.equal(await app.run(), 0);
-    assert.deepEqual(calls, [{ items: ["a", "b"], dest: "carpeta-actual" }]);
-    assert.equal(stdout.output, "✓ Descarga completada: 2 archivos nuevos, 0 ya existían — carpeta-actual\n");
+    assert.deepEqual(calls, [{ items: ["a", "b"], dest: "carpeta-actual/Alfa" }]);
+    assert.equal(stdout.output, "✓ Descarga completada: 2 archivos nuevos, 0 ya existían — carpeta-actual\nMulțumesc!\n:)\n");
     assert.equal(stderr.output, "");
     assert.deepEqual([terminal.opened, terminal.closed, terminal.remainingKeys], [1, 1, 0]);
 
     const frames = terminal.allFrames();
     assert.match(frames, /Cargando cursos…/);
-    assert.ok(frames.indexOf("> Alfa") < frames.indexOf("  Beta") || frames.includes("> Alfa\n  Beta"));
+    assert.match(frames, /> \[ \] Alfa\n  \[ \] Beta/);
     assert.match(frames, /Cargando el contenido de «Alfa»…/);
     assert.ok(frames.indexOf("Semana 1 — Uno") < frames.indexOf("Semana 3 — Tres"));
     assert.match(frames, /Confirmar la descarga de 2 contenidos/);
-    assert.match(frames, /En la carpeta actual \(.*carpeta-actual\)/);
+    assert.match(frames, /En la carpeta actual \(/);
     assert.match(frames, /Descargando 0\/2/);
   });
 
@@ -86,7 +88,7 @@ describe("TuiApplication · camino feliz", () => {
   it("un destino distinto se escribe en una línea y se usa tal cual", async () => {
     const { app, calls } = make([key("enter"), key("space"), key("enter"), key("enter"), key("down"), key("enter"), ...chars("mi material"), key("enter")]);
     assert.equal(await app.run(), 0);
-    assert.equal(calls[0]!.dest, "mi material");
+    assert.equal(calls[0]!.dest, "mi material/Alfa");
   });
 
   it("muestra cuántos se omitieron por existir ya", async () => {
@@ -95,6 +97,36 @@ describe("TuiApplication · camino feliz", () => {
     });
     assert.equal(await app.run(), 0);
     assert.match(stdout.output, /0 archivos nuevos, 1 ya existían/);
+  });
+
+  it("anima la sonrisa en la terminal después del agradecimiento", async () => {
+    const { app, terminal, stdout } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")], { animate: true });
+    assert.equal(await app.run(), 0);
+    assert.equal(terminal.closed, 1);
+    const frames = stdout.output.split("Mulțumesc!\n")[1]!.split("\x1b[4A");
+    assert.equal(frames.length, 3);
+    assert.match(frames[0]!, /- -/);
+    assert.match(frames[2]!, /\\_\//);
+  });
+
+  it("permite continuar si uno de los cursos elegidos carece de materiales", async () => {
+    const { app, terminal, calls } = make([
+      ...chars("A"), key("enter"), key("space"), key("enter"),
+      key("space"), key("enter"), key("enter"), key("enter"),
+    ]);
+    assert.equal(await app.run(), 0);
+    assert.match(terminal.allFrames(), /Este curso no tiene contenido descargable/);
+    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Alfa" }]);
+  });
+
+  it("vuelve al selector si ninguno de los cursos elegidos tiene materiales", async () => {
+    const empty: CourseContents = { sections: [], items: [] };
+    const { app, terminal, calls } = make([
+      ...chars("A"), key("enter"), key("enter"), key("enter"), key("escape"),
+    ], { contents: { "1": empty, "2": empty } });
+    assert.equal(await app.run(), 130);
+    assert.match(terminal.lastFrame, /Tus cursos[\s\S]*\[x\] Alfa[\s\S]*\[x\] Beta/);
+    assert.deepEqual(calls, []);
   });
 });
 
@@ -130,7 +162,7 @@ describe("TuiApplication · navegación", () => {
       key("enter"), key("enter"), // confirma y elige la carpeta actual
     ]);
     assert.equal(await app.run(), 0);
-    assert.equal(calls[0]!.dest, "carpeta-actual");
+    assert.equal(calls[0]!.dest, "carpeta-actual/Alfa");
   });
 
   it("tras confirmar una selección y cambiar de curso, los contenidos empiezan sin marcar", async () => {

@@ -64,6 +64,7 @@ export interface Services {
   readonly catalog: CatalogService;
   readonly resolver: CourseResolver;
   readonly batch: BatchDownloader;
+  readonly namer: FileNamer;
   readonly printer: ReportPrinter;
   readonly convert: ConvertScormToPdf;
 }
@@ -155,6 +156,7 @@ export class ServiceFactory {
       platform,
       catalog,
       resolver: new CourseResolver({ catalog, messages }),
+      namer,
       batch: new BatchDownloader({
         // Dentro de un lote el progreso de cada SCORM sería ruido: solo pasan sus avisos.
         items: new ItemDownloader({ platform, slides: pipeline(new QuietLogger({ inner: logger })), namer, sink, tracer }),

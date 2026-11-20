@@ -1,14 +1,17 @@
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import type { BatchReport } from "../application/BatchDownloader.ts";
 import type { CatalogService } from "../application/CatalogService.ts";
+import type { FileNamer } from "../application/FileNamer.ts";
 import type { ProgressUpdate } from "../application/ports.ts";
 import type { ReportPrinter } from "../application/ReportPrinter.ts";
-import type { CourseContents, CourseItem, CourseSummary } from "../domain/catalog.ts";
+import type { CourseContents, CourseItem, CourseSummary, Section } from "../domain/catalog.ts";
 import { errorMessage } from "../domain/errors.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { OutputStream } from "../infra/ConsoleLogger.ts";
 import type { FrameLayout } from "./FrameLayout.ts";
 import { ScreenRunner } from "./ScreenRunner.ts";
+import { CourseSelectionScreen } from "./screens/CourseSelectionScreen.ts";
 import { ItemSelectionScreen } from "./screens/ItemSelectionScreen.ts";
 import { ListScreen } from "./screens/ListScreen.ts";
 import { ReviewScreen } from "./screens/ReviewScreen.ts";
@@ -17,26 +20,35 @@ import type { Terminal } from "./Terminal.ts";
 import type { TuiLogger } from "./TuiLogger.ts";
 
 export interface ItemBatch {
-  run(items: readonly CourseItem[], destRoot: string): Promise<BatchReport>;
+  run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[]): Promise<BatchReport>;
 }
 
 type Step = "course" | "items" | "confirm" | "destination";
+interface CourseSelection {
+  readonly course: CourseSummary;
+  readonly sections: readonly Section[];
+  readonly items: readonly CourseItem[];
+}
 type Outcome = { kind: "cancelled" } | { kind: "finished"; report: BatchReport; dest: string };
 type Destination = { kind: "cancelled" } | { kind: "back" } | { kind: "path"; path: string };
 
 const CANCELLED_EXIT_CODE = 130;
 const BAR_WIDTH = 30;
+const SMILE_FRAMES = [
+  ["  _____  ", " / - - \\ ", "|   .   |", " \\_____/ "],
+  ["  _____  ", " / o o \\ ", "|  ___  |", " \\_____/ "],
+  ["  _____  ", " / o o \\ ", "|  \\_/  |", " \\_____/ "],
+];
 
 /**
- * Flujo interactivo: curso → contenidos por semana → confirmación → destino → descarga.
- * Cada Esc retrocede un paso conservando lo marcado; Ctrl+C cancela. Si todo sale bien, la terminal
- * se restaura y solo queda el mensaje de éxito; si algo falla, se muestran los errores antes de salir.
+ * Selección de cursos y de contenidos por curso, seguida de una confirmación y un destino comunes.
  */
 export class TuiApplication {
   private readonly terminal: Terminal;
   private readonly runner: ScreenRunner;
   private readonly catalog: CatalogService;
   private readonly batch: ItemBatch;
+  private readonly namer: FileNamer;
   private readonly logger: TuiLogger;
   private readonly printer: ReportPrinter;
   private readonly messages: Messages;
@@ -49,6 +61,7 @@ export class TuiApplication {
     terminal: Terminal;
     catalog: CatalogService;
     batch: ItemBatch;
+    namer: FileNamer;
     logger: TuiLogger;
     printer: ReportPrinter;
     messages: Messages;
@@ -61,6 +74,7 @@ export class TuiApplication {
     this.runner = new ScreenRunner({ terminal: deps.terminal });
     this.catalog = deps.catalog;
     this.batch = deps.batch;
+    this.namer = deps.namer;
     this.logger = deps.logger;
     this.printer = deps.printer;
     this.messages = deps.messages;
@@ -84,29 +98,42 @@ export class TuiApplication {
   private async flow(): Promise<Outcome> {
     const { tui } = this.messages;
     const courses = await this.loading(tui.loadingCourses(), () => this.catalog.courses());
+    const folders = this.namer.directoryNames(courses.map((course) => [course.id, course.name]));
+    const markedCourses = new Set<string>();
+    const selections = new Map<string, CourseSelection>();
     let step: Step = "course";
-    let course: CourseSummary = courses[0]!;
-    let contents: CourseContents = { sections: [], items: [] };
-    let marked = new Set<string>();
-    let selected: CourseItem[] = [];
+    let chosen: readonly CourseSummary[] = [];
+    let courseIndex = 0;
+    let selected: CourseSelection[] = [];
 
     for (;;) {
       if (step === "course") {
-        const result = await this.runner.run(this.coursesScreen(courses));
+        const result = await this.runner.run(new CourseSelectionScreen({
+          courses, marked: markedCourses, layout: this.layout, messages: this.messages,
+        }));
         if (result.kind !== "done") return { kind: "cancelled" };
-        course = result.value;
-        contents = await this.loading(tui.loadingContents({ course: course.name }), () => this.catalog.contents(course));
-        marked = new Set();
+        chosen = result.value;
+        selections.clear();
+        courseIndex = 0;
         step = "items";
       } else if (step === "items") {
-        const result = await this.runner.run(this.itemsScreen(course, contents, marked));
+        const course = chosen[courseIndex]!;
+        const contents = await this.loading(tui.loadingContents({ course: course.name }), () => this.catalog.contents(course));
+        const previous = selections.get(course.id)?.items ?? [];
+        const marked = new Set(previous.map((item) => item.id));
+        const result = await this.runner.run(this.itemsScreen(course, contents, marked, chosen.length > 1));
         if (result.kind === "cancel") return { kind: "cancelled" };
         if (result.kind === "back") {
-          step = "course";
+          if (courseIndex === 0) step = "course";
+          else courseIndex -= 1;
         } else {
-          selected = result.value;
-          marked = new Set(selected.map((item) => item.id));
-          step = "confirm";
+          selections.set(course.id, { course, sections: this.catalog.sectionsOf(contents), items: result.value });
+          if (courseIndex < chosen.length - 1) {
+            courseIndex += 1;
+          } else {
+            selected = chosen.map(({ id }) => selections.get(id)!).filter(({ items }) => items.length > 0);
+            step = selected.length === 0 ? "course" : "confirm";
+          }
         }
       } else if (step === "confirm") {
         const result = await this.runner.run(this.confirmScreen(selected));
@@ -116,23 +143,12 @@ export class TuiApplication {
         const destination = await this.chooseDestination();
         if (destination.kind === "cancelled") return destination;
         if (destination.kind === "back") step = "confirm";
-        else return this.download(selected, destination.path);
+        else return this.download(selected, destination.path, folders);
       }
     }
   }
 
-  private coursesScreen(courses: readonly CourseSummary[]): ListScreen<CourseSummary> {
-    const { tui } = this.messages;
-    return new ListScreen({
-      title: tui.coursesTitle(),
-      footer: tui.keysList(),
-      items: courses.map((course) => ({ label: course.name, value: course })),
-      emptyMessage: tui.noCourses(),
-      layout: this.layout,
-    });
-  }
-
-  private itemsScreen(course: CourseSummary, contents: CourseContents, marked: ReadonlySet<string>): ItemSelectionScreen {
+  private itemsScreen(course: CourseSummary, contents: CourseContents, marked: ReadonlySet<string>, skipEmpty: boolean): ItemSelectionScreen {
     const weeks = this.catalog
       .sectionsOf(contents)
       .map((section) => ({ section, items: this.catalog.itemsIn(contents, section.number) }));
@@ -140,21 +156,26 @@ export class TuiApplication {
       title: this.messages.tui.itemsTitle({ course: course.name }),
       weeks,
       marked,
+      skipEmpty,
       layout: this.layout,
       messages: this.messages,
     });
   }
 
-  private confirmScreen(selected: readonly CourseItem[]): ReviewScreen {
+  private confirmScreen(selected: readonly CourseSelection[]): ReviewScreen {
     const { tui, commands } = this.messages;
     const lines: string[] = [];
-    const numbers = [...new Set(selected.map((item) => item.sectionNumber))].sort((a, b) => a - b);
-    for (const number of numbers) {
-      lines.push(commands.weekHeading({ number: String(number), title: "" }));
-      for (const item of selected.filter((candidate) => candidate.sectionNumber === number)) lines.push(`  ${item.name}`);
+    for (const { course, sections, items } of selected) {
+      lines.push(course.name);
+      for (const section of sections) {
+        const sectionItems = items.filter((item) => item.sectionNumber === section.number);
+        if (sectionItems.length === 0) continue;
+        lines.push(commands.weekHeading({ number: String(section.number), title: section.title }));
+        for (const item of sectionItems) lines.push(`  ${item.name}`);
+      }
     }
     return new ReviewScreen({
-      title: tui.confirmTitle({ count: String(selected.length) }),
+      title: tui.confirmTitle({ count: String(this.totalItems(selected)) }),
       footer: tui.keysConfirm(),
       lines,
       anyKey: false,
@@ -196,10 +217,29 @@ export class TuiApplication {
     }
   }
 
-  private async download(selected: readonly CourseItem[], dest: string): Promise<Outcome> {
-    this.logger.onProgress((update) => this.showProgress(update));
-    this.showProgress({ done: 0, total: selected.length, label: "" });
-    const report = await this.batch.run(selected, dest);
+  private totalItems(selected: readonly CourseSelection[]): number {
+    return selected.reduce((total, selection) => total + selection.items.length, 0);
+  }
+
+  private async download(selected: readonly CourseSelection[], dest: string, folders: ReadonlyMap<string, string>): Promise<Outcome> {
+    const total = this.totalItems(selected);
+    const outcomes: BatchReport["outcomes"] = [];
+    let downloaded = 0;
+    let skipped = 0;
+    let failed = 0;
+    let aborted = false;
+    this.logger.onProgress((update) => this.showProgress({ ...update, done: outcomes.length + update.done, total }));
+    this.showProgress({ done: 0, total, label: "" });
+    for (const { course, sections, items } of selected) {
+      const result = await this.batch.run(items, join(dest, folders.get(course.id)!), sections);
+      outcomes.push(...result.outcomes);
+      downloaded += result.downloaded;
+      skipped += result.skipped;
+      failed += result.failed;
+      aborted = result.aborted;
+      if (aborted) break;
+    }
+    const report = { outcomes, downloaded, skipped, failed, aborted };
     if (report.failed > 0 || report.aborted) await this.runner.run(this.errorsScreen(report));
     return { kind: "finished", report, dest };
   }
@@ -244,7 +284,7 @@ export class TuiApplication {
     return work();
   }
 
-  private finish(outcome: Outcome): number {
+  private async finish(outcome: Outcome): Promise<number> {
     const { tui, commands } = this.messages;
     if (outcome.kind === "cancelled") {
       this.stderr.write(`${tui.cancelled()}\n`);
@@ -253,6 +293,8 @@ export class TuiApplication {
     const { report, dest } = outcome;
     if (report.failed === 0 && !report.aborted) {
       this.stdout.write(`${tui.success({ downloaded: String(report.downloaded), skipped: String(report.skipped), dest })}\n`);
+      this.stdout.write(`${tui.farewell()}\n`);
+      await this.smile();
       return 0;
     }
     for (const line of this.failureLines(report)) this.stderr.write(`${line}\n`);
@@ -260,5 +302,19 @@ export class TuiApplication {
       `${commands.summary({ downloaded: String(report.downloaded), skipped: String(report.skipped), failed: String(report.failed) })}\n`,
     );
     return this.printer.exitCode(report);
+  }
+
+  private async smile(): Promise<void> {
+    if (this.stdout.isTTY !== true || this.terminal.size().columns < 12) {
+      this.stdout.write(":)\n");
+      return;
+    }
+    for (const [index, frame] of SMILE_FRAMES.entries()) {
+      if (index > 0) {
+        await setTimeout(110);
+        this.stdout.write(`\x1b[${frame.length}A`);
+      }
+      this.stdout.write(`${frame.join("\n")}\n`);
+    }
   }
 }

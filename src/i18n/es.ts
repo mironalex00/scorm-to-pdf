@@ -156,6 +156,8 @@ export const es: Messages = {
     ],
     cookieLabel: () => "Cookie:",
     keysList: () => "↑↓ mover · Enter elegir · Esc salir",
+    keysCourses: () => "↑↓ mover · Espacio marcar · A todo · Enter continuar · Esc salir",
+    keysEmptyCourse: () => "Enter continuar · Esc volver",
     keysItems: () => "↑↓ mover · Espacio marcar · a semana · A todo · Enter continuar · Esc volver",
     keysConfirm: () => "↑↓ desplazar · Enter descargar · Esc volver",
     keysPrompt: () => "Enter aceptar · Esc volver",
@@ -163,6 +165,7 @@ export const es: Messages = {
     downloading: (p) => `Descargando ${p.done}/${p.total}: ${p.label}`,
     errorsTitle: () => "Hubo errores en la descarga",
     success: (p) => `✓ Descarga completada: ${p.downloaded} archivos nuevos, ${p.skipped} ya existían — ${p.dest}`,
+    farewell: () => "Mulțumesc!",
     cancelled: () => "Cancelado.",
   },
 

@@ -13,7 +13,7 @@ Sin Bun: `node src/main.ts` (Node 22.18 o posterior; en 22.6–22.17 añade `--e
 
 | Orden | Qué hace |
 | --- | --- |
-| *(ninguna, en una terminal)* | Selector: cursos (alfabético) → contenidos por semana → confirmación → destino |
+| *(ninguna, en una terminal)* | Selector de uno o varios cursos → contenidos de cada curso → confirmación → destino |
 | `courses [--json]` | Lista tus cursos |
 | `items <curso> [--json]` | Semanas y contenidos de un curso (`<curso>` es el id o parte del nombre) |
 | `get <curso> --all \| --week 1,3 \| --item 501,512 [--dest carpeta]` | Descarga una selección |
@@ -22,9 +22,9 @@ Sin Bun: `node src/main.ts` (Node 22.18 o posterior; en 22.6–22.17 añade `--e
 
 Opciones generales: `--platform`, `--base-url`, `--lang`, `-c/--concurrency`, `--trace`, `--trace-dir`, `-q`, `-h`, `-v`. `--help` muestra todo. Códigos de salida: `0` éxito, `1` error o descargas fallidas, `2` uso incorrecto, `3` sesión no válida, `130` cancelado.
 
-**Selector:** `↑↓` mover · `Espacio` marcar · `a` marca la semana · `A` marca todo · `Enter` continuar · `Esc` volver un paso · `Ctrl+C` cancelar. Si todo va bien, la terminal se restaura y solo queda el mensaje de éxito; si algo falla, se muestran los errores antes de salir.
+**Selector:** `↑↓` mueve el cursor, `Espacio` marca cursos o contenidos, `A` marca todo y `Enter` continúa. Si no has marcado ningún curso, `Enter` abre el que tiene el cursor. En los contenidos, `a` marca una sección. `Esc` vuelve un paso y `Ctrl+C` cancela. Al terminar una descarga exitosa, el selector muestra un agradecimiento en rumano y una sonrisa.
 
-**Destino:** `<destino>/<semana>/<nombre><ext>`. Lo que ya existe se omite, nunca se sobrescribe. Dos contenidos con el mismo nombre en una semana se numeran `(2)`, `(3)` en el orden de la página, no en el de llegada. El número de semana es el que declara la página: ningún valor, el cero incluido, recibe un trato especial.
+**Destino:** el selector guarda en `<destino>/<curso>/<título de sección>/<archivo>`, incluso si eliges un solo curso. `get` guarda en `<destino>/<título de sección>/<archivo>`. Cuando una sección carece de título, se usa su número. Si dos nombres de carpeta coinciden después de quitar caracteres incompatibles, se distinguen con sufijos como `(2)`. Si el destino ya contiene un archivo, se omite.
 
 ## Cuando algo falla (trazabilidad)
 

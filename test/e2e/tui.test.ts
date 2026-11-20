@@ -48,8 +48,8 @@ describe("e2e · selector interactivo", () => {
     const { code, terminal, stdout, stderr } = await run(moodle, [...chooseFirstCourseAndMarkAll, key("enter"), key("enter")]);
 
     assert.equal(code, 0, stderr);
-    assert.deepEqual(await pdfs(work), ["0/Programa.pdf", "1/Curs 5. Funcții.pdf", "1/Exerciții & teme.pdf", "3/Complementar.pdf"]);
-    assert.equal((await readFile(join(work, "1/Curs 5. Funcții.pdf"))).subarray(0, 4).toString("latin1"), "%PDF");
+    assert.deepEqual(await pdfs(work), ["Algoritmi fundamentali/General/Programa.pdf", "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf", "Algoritmi fundamentali/Săptămâna 1/Exerciții & teme.pdf", "Algoritmi fundamentali/Săptămâna 3/Complementar.pdf"]);
+    assert.equal((await readFile(join(work, "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf"))).subarray(0, 4).toString("latin1"), "%PDF");
     assert.match(stdout, /^✓ Descarga completada: 4 archivos nuevos, 0 ya existían/);
     assert.equal(stderr, "");
     assert.deepEqual([terminal.opened, terminal.closed, terminal.remainingKeys], [1, 1, 0]);
@@ -62,7 +62,7 @@ describe("e2e · selector interactivo", () => {
     const keys = [...chooseFirstCourseAndMarkAll, key("enter"), key("down"), key("enter"), ...chars(custom), key("enter")];
     const { code } = await run(await server(), keys);
     assert.equal(code, 0);
-    assert.deepEqual(await pdfs(custom), ["0/Programa.pdf", "1/Curs 5. Funcții.pdf", "1/Exerciții & teme.pdf", "3/Complementar.pdf"]);
+    assert.deepEqual(await pdfs(custom), ["Algoritmi fundamentali/General/Programa.pdf", "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf", "Algoritmi fundamentali/Săptămâna 1/Exerciții & teme.pdf", "Algoritmi fundamentali/Săptămâna 3/Complementar.pdf"]);
   });
 
   it("muestra una subsección del cuerpo del curso y descarga su material", async () => {
@@ -71,14 +71,29 @@ describe("e2e · selector interactivo", () => {
     ]);
     assert.equal(code, 0, stderr);
     assert.match(terminal.allFrames(), /Semana 2 — Tema[\s\S]*Tema 1 {2}\(recurso\)/);
-    assert.deepEqual(await pdfs(work), ["2/Tema 1.pdf"]);
+    assert.deepEqual(await pdfs(work), ["Structuri de date/Tema/Tema 1.pdf"]);
+  });
+
+  it("descarga una selección de cada curso bajo un único destino", async () => {
+    const { code, terminal, stdout, stderr } = await run(await server(), [
+      key("space"), key("down"), key("space"), key("enter"),
+      key("space"), key("enter"), key("space"), key("enter"), key("enter"), key("enter"),
+    ]);
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(await pdfs(work), [
+      "Algoritmi fundamentali/General/Programa.pdf",
+      "Structuri de date/Tema/Tema 1.pdf",
+    ]);
+    assert.match(terminal.allFrames(), /Confirmar la descarga de 2 contenidos[\s\S]*Algoritmi fundamentali[\s\S]*Structuri de date/);
+    assert.match(terminal.allFrames(), /Descargando 2\/2: Tema 1/);
+    assert.match(stdout, /2 archivos nuevos[\s\S]*Mulțumesc!/);
   });
 
   it("puede elegir solo una semana con a y descargarla", async () => {
     // Cursor en la primera semana (0): «a» marca solo Programa.
     const { code } = await run(await server(), [key("enter"), ...chars("a"), key("enter"), key("enter"), key("enter")]);
     assert.equal(code, 0);
-    assert.deepEqual(await pdfs(work), ["0/Programa.pdf"]);
+    assert.deepEqual(await pdfs(work), ["Algoritmi fundamentali/General/Programa.pdf"]);
   });
 
   it("Ctrl+C cancela con 130, restaura la terminal y no deja archivos ni traza", async () => {
@@ -95,7 +110,7 @@ describe("e2e · selector interactivo", () => {
     assert.equal(code, 1);
     assert.match(terminal.allFrames(), /Hubo errores en la descarga[\s\S]*Fallo en «Complementar»/);
     assert.match(stderr, /Fallo en «Complementar»[\s\S]*Descargados: 3 · Omitidos: 0 · Fallidos: 1[\s\S]*Traza guardada en/);
-    assert.deepEqual(await pdfs(work), ["0/Programa.pdf", "1/Curs 5. Funcții.pdf", "1/Exerciții & teme.pdf"]);
+    assert.deepEqual(await pdfs(work), ["Algoritmi fundamentali/General/Programa.pdf", "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf", "Algoritmi fundamentali/Săptămâna 1/Exerciții & teme.pdf"]);
   });
 
   it("una sesión no válida termina con 3 y la terminal restaurada", async () => {
