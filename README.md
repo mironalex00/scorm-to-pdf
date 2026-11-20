@@ -26,6 +26,10 @@ Opciones generales: `--platform`, `--base-url`, `--lang`, `-c/--concurrency`, `-
 
 **Destino:** el selector guarda en `<destino>/content/<curso>/<título de sección>/<nombre del material>/<archivo>`, incluso si eliges un solo curso. `get` guarda en `<destino>/<título de sección>/<archivo>`. Cuando una sección carece de título, se usa su número. Si dos nombres de carpeta coinciden después de quitar caracteres incompatibles, se distinguen con sufijos como `(2)`. Si el destino ya contiene un archivo, se omite.
 
+## Motor ASCII
+
+La [extensión ASCII](src/extensions/ascii/README.md) convierte imágenes, GIF y vídeos en texto, animaciones para terminal, HTML, JSON, imágenes o vídeo. La conversión usa FFmpeg y FFprobe. La reproducción de los cuadros de despedida y de error del selector usa el mismo ajuste de pantalla.
+
 ## Cuando algo falla (trazabilidad)
 
 La herramienta se diseñó para depurarse sin acceso a tu Moodle. Cada operación deja un evento con **cuándo** (marca de tiempo y duración), **dónde** (ámbito y contenido afectado) y **cómo** (cadena de causas y la forma de la respuesta recibida, sin sus valores).
