@@ -1,10 +1,6 @@
 const SENTENCE_BREAK = ". ";
 
-/**
- * Deduce el nombre del PDF a partir del título del documento. El título viene del
- * servidor, así que solo sobreviven letras, números y guiones: nunca separadores
- * de ruta ni caracteres de control.
- */
+/** Derives a path-safe PDF name from the document title. */
 export class OutputNamer {
   private readonly maxStemLength: number;
 

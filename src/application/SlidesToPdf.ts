@@ -9,7 +9,7 @@ export interface RenderedPdf {
   readonly pages: number;
 }
 
-/** El flujo de un SCORM de diapositivas: leer el mazo, descargar sus imágenes y componer el PDF. */
+/** Parses the deck, downloads its images, and builds the PDF. */
 export class SlidesToPdf {
   private readonly parser: SlideListParser;
   private readonly downloader: SlideDownloader;
