@@ -1,11 +1,7 @@
 import type { OptionName } from "../cli/optionNames.ts";
 import type { ValueKind } from "../cli/optionSpecs.ts";
 
-/**
- * Contrato de todos los textos visibles para el usuario. Cada idioma implementa esta interfaz
- * completa: el compilador rechaza un catálogo al que le falte un mensaje o le sobre un parámetro.
- * Los mensajes con datos son funciones que reciben ya formateados los valores (sin aritmética).
- */
+/** Each locale implements this catalog. Parameters are formatted by the caller. */
 export interface Messages {
   readonly locale: string;
 
@@ -17,7 +13,7 @@ export interface Messages {
   readonly options: Readonly<Record<OptionName, string>>;
 
   readonly help: {
-    /** Cómo se llama en la ayuda el valor de cada opción: --out <archivo>. */
+    /** Placeholder labels for option values in help output. */
     readonly values: Readonly<Record<ValueKind, string>>;
     intro(p: { program: string }): string[];
     commandsHeading(): string;
@@ -43,7 +39,8 @@ export interface Messages {
     scormIdLabel(): string;
     entryLabelUrl(): string;
     unsafeEntry(p: { label: string; raw: string }): string;
-    baseUrlInvalid(p: { source: string; raw: string }): string;
+    baseUrlInvalid(p: { source: string }): string;
+    baseUrlCredentials(p: { source: string }): string;
     baseUrlInsecure(p: { source: string; raw: string }): string;
     sourceUrlGiven(): string;
     outAndOutDir(): string;
@@ -135,7 +132,8 @@ export interface Messages {
 
   readonly trace: {
     saved(p: { path: string }): string;
-    savedHint(p: { path: string }): string;
+    enableHint(): string;
+    unavailable(): string;
   };
 
   readonly app: {
@@ -198,6 +196,7 @@ export interface Messages {
   };
 
   readonly downloader: {
+    deckTooLarge(p: { max: string }): string;
     slideLabel(p: { position: string }): string;
     retrying(p: { label: string; attempt: string; retries: string; reason: string }): string;
     unexpectedContentType(p: { contentType: string }): string;

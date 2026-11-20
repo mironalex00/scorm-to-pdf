@@ -11,11 +11,7 @@ import type { PluginfileLocator } from "./PluginfileLocator.ts";
 const SCOPE = "moodle.resource";
 const PLUGINFILE_PATH = /\/pluginfile\.php\/[^\s"'<>)]+/;
 
-/**
- * Obtiene el archivo de un recurso. `view.php?id=…&redirect=1` suele redirigir al archivo; si
- * Moodle devuelve su página visor, se localiza el archivo en `#resourceobject`, en un enlace a
- * pluginfile o, como último recurso, en cualquier referencia dentro del documento.
- */
+/** Resolves direct downloads and Moodle viewer pages that link to pluginfile.php. */
 export class ResourceFetcher {
   private readonly session: MoodleSession;
   private readonly profile: MoodleProfile;
@@ -54,18 +50,17 @@ export class ResourceFetcher {
       finalPath: first.finalUrl.pathname,
       bytes: first.bytes.length,
     });
-    if (!this.isHtml(first.contentType)) return this.asFile(first);
-
-    const page = new TextDecoder("utf-8").decode(first.bytes);
+    const page = this.viewerPage(first);
+    if (page === undefined) return this.asFile(first);
     tracer.snapshot(`resource-viewer-${item.id}`, page, { path: first.finalUrl.pathname });
     const reference = this.findReference(page);
     if (reference === undefined) throw this.unresolved(item, page);
 
-    tracer.event("debug", SCOPE, "file.reference", { reference });
-    const second = await this.session.getBytes(new URL(reference, first.finalUrl), this.profile.maxFileBytes);
-    if (this.isHtml(second.contentType)) {
-      throw this.unresolved(item, new TextDecoder("utf-8").decode(second.bytes));
-    }
+    const fileUrl = new URL(reference, first.finalUrl);
+    tracer.event("debug", SCOPE, "file.reference", { path: fileUrl.pathname });
+    const second = await this.session.getBytes(fileUrl, this.profile.maxFileBytes);
+    const secondPage = this.viewerPage(second);
+    if (secondPage !== undefined) throw this.unresolved(item, secondPage);
     return this.asFile(second);
   }
 
@@ -89,8 +84,11 @@ export class ResourceFetcher {
     };
   }
 
-  private isHtml(contentType: string): boolean {
-    return /text\/html|application\/xhtml/i.test(contentType);
+  private viewerPage({ contentType, contentDisposition, bytes, finalUrl }: FetchedBytes): string | undefined {
+    if (!/text\/html|application\/xhtml/i.test(contentType) || /^\s*attachment\b/i.test(contentDisposition ?? "")) return undefined;
+    const page = new TextDecoder().decode(bytes);
+    this.session.assertAuthenticated(page, finalUrl);
+    return /\/pluginfile\.php\/.*\.(?:html?|xhtml)$/i.test(finalUrl.pathname) ? undefined : page;
   }
 
   private unresolved(item: CourseItem, page: string): PlatformError {

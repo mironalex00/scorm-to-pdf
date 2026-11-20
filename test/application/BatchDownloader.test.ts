@@ -26,7 +26,7 @@ function make(behaviour: (item: CourseItem, baseName: string) => Promise<ItemOut
 const ok = (it: CourseItem, path: string): ItemOutcome => ({ item: it, status: "downloaded", path, bytes: 1 });
 
 describe("BatchDownloader", () => {
-  it("descarga todo, conserva el orden de entrada, aplica nombres deterministas y cuenta los resultados", async () => {
+  it("downloads all items, keeps their order, and reports totals with stable filenames", async () => {
     const seen: string[] = [];
     const { batch, logger } = make(async (it, baseName) => {
       seen.push(baseName);
@@ -40,7 +40,7 @@ describe("BatchDownloader", () => {
     assert.deepEqual(logger.updates.map((u) => u.label).sort(), ["Otro", "Tema", "Tema"]);
   });
 
-  it("respeta el paralelismo máximo", async () => {
+  it("limits concurrent downloads", async () => {
     let inFlight = 0;
     let max = 0;
     const { batch } = make(async (it) => {
@@ -54,8 +54,19 @@ describe("BatchDownloader", () => {
     assert.equal(max, 2);
   });
 
-  it("el fallo de un ítem no detiene los demás y queda registrado con su error", async () => {
-    const boom = new DownloadError("sin red");
+  it("keeps names stable when duplicate titles are selected in separate runs", async () => {
+    const first = item("a", "Notes");
+    const second = item("b", "Notes");
+    const naming = { allItems: [first, second], groupByItem: false };
+    const { batch } = make(async (entry, baseName) => ok(entry, `out/${baseName}`));
+    const firstReport = await batch.run([first], "out", [], naming);
+    const secondReport = await batch.run([second], "out", [], naming);
+    assert.deepEqual(firstReport.outcomes, [ok(first, "out/Notes")]);
+    assert.deepEqual(secondReport.outcomes, [ok(second, "out/Notes (2)")]);
+  });
+
+  it("records an item failure and continues the batch", async () => {
+    const boom = new DownloadError("no network");
     const { batch } = make(async (it) => {
       if (it.id === "b") throw boom;
       return ok(it, "p");
@@ -67,7 +78,7 @@ describe("BatchDownloader", () => {
     assert.equal(failure.status === "failed" && failure.authentication, false);
   });
 
-  it("un error de sesión aborta el resto del lote y se marca como autenticación", async () => {
+  it("stops the batch and records an authentication failure when the session expires", async () => {
     const started: string[] = [];
     const { batch } = make(async (it) => {
       started.push(it.id);
@@ -82,7 +93,7 @@ describe("BatchDownloader", () => {
     assert.equal(failure.status === "failed" && failure.authentication, true);
   });
 
-  it("un lote vacío devuelve un informe vacío", async () => {
+  it("returns an empty report for an empty batch", async () => {
     const { batch } = make(async (it) => ok(it, "p"));
     assert.deepEqual(await batch.run([], "out"), { outcomes: [], downloaded: 0, skipped: 0, failed: 0, aborted: false });
   });

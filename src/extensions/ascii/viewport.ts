@@ -1,4 +1,4 @@
-/** Centra un cuadro de texto y recorta los bordes cuando la terminal es más pequeña. */
+/** Centers a text frame and crops it to fit the terminal. */
 export function fitAsciiFrame(frame: readonly string[], columns: number, rows: number): string[] {
   const width = frame.reduce((longest, line) => Math.max(longest, line.length), 0);
   const top = Math.max(0, Math.floor((rows - frame.length) / 2));

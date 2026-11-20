@@ -1,6 +1,6 @@
 import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CliApplication } from "../../src/CliApplication.ts";
@@ -47,8 +47,8 @@ async function run(argv: string[], env: Record<string, string | undefined> = {},
 
 const baseArgs = () => ["10067", "--base-url", moodle.origin, "--out-dir", outDir];
 
-describe("CliApplication · éxito con solo el ID", () => {
-  it("detecta la revisión, descarga, genera el PDF con nombre automático y devuelve su ruta", async () => {
+describe("SCORM conversion by ID", () => {
+  it("discovers the revision and saves the PDF with a title-based filename", async () => {
     const { code, stdout, stderr } = await run(baseArgs());
     const expected = join(outDir, "AFSD-Curs-5.pdf");
 
@@ -61,92 +61,102 @@ describe("CliApplication · éxito con solo el ID", () => {
 
     const lines = stdout.trimEnd().split("\n");
     assert.equal(lines.at(-1), expected);
-    assert.match(stdout, /revisión 3/);
-    assert.match(stdout, /Listo: 3 páginas/);
+    assert.match(stdout, /revision 3/);
+    assert.match(stdout, /Done: 3 pages/);
   });
 
-  it("también acepta la URL completa de pluginfile.php en lugar del ID", async () => {
+  it("accepts a full pluginfile.php URL", async () => {
     const url = `${moodle.origin}/pluginfile.php/10067/mod_scorm/content/3/index.html`;
     const { code } = await run([url, "-o", join(outDir, "desde-url.pdf"), "-q"]);
     assert.equal(code, 0);
     assert.deepEqual(await readdir(outDir), ["desde-url.pdf"]);
   });
 
-  it("--quiet imprime únicamente la ruta del PDF", async () => {
+  it("prints only the PDF path in quiet mode", async () => {
     const { code, stdout } = await run([...baseArgs(), "-q"]);
     assert.equal(code, 0);
     assert.equal(stdout, `${join(outDir, "AFSD-Curs-5.pdf")}\n`);
   });
 
-  it("MOODLE_BASE_URL sustituye a --base-url", async () => {
+  it("reads the base URL from MOODLE_BASE_URL", async () => {
     const { code } = await run(["10067", "--out-dir", outDir, "-q"], { MOODLE_BASE_URL: moodle.origin });
     assert.equal(code, 0);
   });
 });
 
-describe("CliApplication · ayuda y versión", () => {
-  it("--help imprime el uso y sale con 0 sin necesitar cookie", async () => {
+describe("CLI help and version", () => {
+  it("prints help without a Moodle cookie", async () => {
     const { code, stdout } = await run(["--help"], { MOODLE_COOKIE: undefined });
     assert.equal(code, 0);
-    assert.match(stdout, /^Uso: scorm-to-pdf \[orden\] \[opciones\]/);
+    assert.match(stdout, /^Usage: scorm-to-pdf \[command\] \[options\]/);
   });
 
-  it("--version imprime programa y versión", async () => {
+  it("prints the program name and version", async () => {
     const { code, stdout } = await run(["--version"]);
     assert.deepEqual([code, stdout], [0, `scorm-to-pdf ${VERSION}\n`]);
   });
 });
 
-describe("CliApplication · errores y códigos de salida", () => {
-  it("sin argumentos y sin terminal: código 2 que explica cómo usar las órdenes", async () => {
+describe("CLI errors and exit codes", () => {
+  it("prints a usage hint when the selector has no terminal", async () => {
     const { code, stderr } = await run([]);
     assert.equal(code, 2);
-    assert.match(stderr, /^ERROR: El selector interactivo necesita una terminal/);
+    assert.match(stderr, /^ERROR: The interactive selector requires a terminal/);
     assert.match(stderr, /--help/);
   });
 
-  it("opción desconocida: código 2 con sugerencia", async () => {
+  it("suggests a spelling for unknown options", async () => {
     const { code, stderr } = await run(["10067", "--ot"]);
     assert.equal(code, 2);
-    assert.match(stderr, /¿Quisiste decir --out\?/);
+    assert.match(stderr, /Did you mean --out\?/);
   });
 
-  it("sin MOODLE_COOKIE: código 2 que nombra la variable", async () => {
+  it("names MOODLE_COOKIE when it is missing", async () => {
     const { code, stderr } = await run(baseArgs(), { MOODLE_COOKIE: undefined });
     assert.equal(code, 2);
     assert.match(stderr, /MOODLE_COOKIE/);
   });
 
-  it("cookie inválida: código 3, explica cómo obtenerla y no deja PDF ni filtra la cookie", async () => {
+  it("reports an invalid session without leaking the cookie or creating a PDF", async () => {
     const { code, stderr } = await run(baseArgs(), { MOODLE_COOKIE: "MoodleSession=caducada" });
     assert.equal(code, 3);
-    assert.match(stderr, /Cookies enviadas \(solo nombres\): MoodleSession/);
-    assert.match(stderr, /DevTools/);
+    assert.match(stderr, /Cookies sent \(names only\): MoodleSession/);
+    assert.match(stderr, /Developer Tools/);
     assert.ok(!stderr.includes("caducada"));
     assert.deepEqual(await readdir(outDir), []);
   });
 
-  it("ID inexistente: código 1 con el rango de revisiones probado", async () => {
+  it("reports the tried revisions when a SCORM ID is missing", async () => {
     const { code, stderr } = await run(["99999", "--base-url", moodle.origin, "--out-dir", outDir]);
     assert.equal(code, 1);
-    assert.match(stderr, /No se encontró index\.html para el SCORM 99999/);
+    assert.match(stderr, /Could not find index\.html for SCORM 99999/);
   });
 
-  it("error inesperado: código 1; con DEBUG muestra la traza", async () => {
+  it("reports unexpected errors and includes a stack when DEBUG is enabled", async () => {
     const failing: HttpClient = { get: () => Promise.reject(new TypeError("boom")) };
     const plain = await run(baseArgs(), {}, failing);
     assert.equal(plain.code, 1);
-    assert.match(plain.stderr, /^ERROR inesperado: boom\nTraza guardada en /);
+    assert.match(plain.stderr, /^Unexpected error: boom\nRun again with --trace/);
 
     const debug = await run(baseArgs(), { DEBUG: "1" }, failing);
     assert.match(debug.stderr, /TypeError: boom\n\s+at /);
-    assert.ok((await readdir(traceRoot)).some((name) => name.startsWith("scorm-trace-")), "el fallo deja traza");
+    assert.deepEqual(await readdir(traceRoot), []);
   });
 
-  it("un valor lanzado que no es Error también se informa", async () => {
-    const failing: HttpClient = { get: () => Promise.reject("texto suelto") };
+  it("reports thrown values that are not Error objects", async () => {
+    const failing: HttpClient = { get: () => Promise.reject("plain text") };
     const { code, stderr } = await run(baseArgs(), { DEBUG: "1" }, failing);
     assert.equal(code, 1);
-    assert.match(stderr, /ERROR inesperado: texto suelto/);
+    assert.match(stderr, /Unexpected error: plain text/);
+  });
+
+  it("reports when the requested trace cannot be saved", async () => {
+    const existingFile = join(traceRoot, "occupied");
+    await writeFile(existingFile, "keep this file");
+    const result = await run(["diagnose", "--base-url", moodle.origin, "--trace-dir", existingFile]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Could not write the trace/);
+    assert.doesNotMatch(result.stdout, /Full trace saved to/);
+    assert.equal(await readFile(existingFile, "utf8"), "keep this file");
   });
 });

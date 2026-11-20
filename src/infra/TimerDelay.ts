@@ -1,7 +1,14 @@
+import { setTimeout } from "node:timers/promises";
 import type { Delay } from "../application/ports.ts";
 
 export class TimerDelay implements Delay {
+  private readonly signal: AbortSignal | undefined;
+
+  constructor(signal?: AbortSignal) {
+    this.signal = signal;
+  }
+
   wait(milliseconds: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+    return setTimeout(milliseconds, undefined, { signal: this.signal });
   }
 }

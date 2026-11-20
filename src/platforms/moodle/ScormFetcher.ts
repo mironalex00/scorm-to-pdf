@@ -22,11 +22,7 @@ interface LaunchParams {
   readonly attempt: string;
 }
 
-/**
- * Resuelve un SCORM al documento de entrada de su contenido. Los datos de lanzamiento (a, scoid,
- * currentorg, mode, attempt) salen de la URL player.php, de un enlace o del formulario de la página
- * view.php; la URL real del contenido la entrega loadSCO.php, ya sea por redirección o en su cuerpo.
- */
+/** Reads the SCORM launch parameters and uses loadSCO.php to locate the entry document. */
 export class ScormFetcher {
   private readonly session: MoodleSession;
   private readonly profile: MoodleProfile;
@@ -54,7 +50,10 @@ export class ScormFetcher {
   async fetch(item: CourseItem): Promise<FetchedItem> {
     const tracer = this.tracer.with({ item: item.id });
     const params = await this.findLaunchParams(item);
-    tracer.event("debug", SCOPE, "launch.params", { ...params });
+    tracer.event("debug", SCOPE, "launch.params", {
+      module: params.a !== undefined ? "activity" : "course-module",
+      scoid: /^\d{1,10}$/.test(params.scoid) ? params.scoid : undefined,
+    });
 
     const load = new URL("mod/scorm/loadSCO.php", this.profile.baseUrl);
     load.searchParams.set(params.a !== undefined ? "a" : "id", params.a ?? params.cm ?? item.id);
@@ -76,8 +75,9 @@ export class ScormFetcher {
         }),
       );
     }
-    tracer.event("debug", SCOPE, "entry.reference", { reference });
-    const entry = await this.session.getText(new URL(reference, this.profile.baseUrl), `scorm-entry-${item.id}`);
+    const entryUrl = new URL(reference, this.profile.baseUrl);
+    tracer.event("debug", SCOPE, "entry.reference", { path: entryUrl.pathname });
+    const entry = await this.session.getText(entryUrl, `scorm-entry-${item.id}`);
     return this.slides(entry.finalUrl, entry.text);
   }
 

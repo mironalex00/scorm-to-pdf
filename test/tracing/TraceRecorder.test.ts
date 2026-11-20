@@ -23,8 +23,8 @@ function make(options: { streaming?: boolean; capture?: boolean; ringSize?: numb
 }
 const parse = (lines: string[]): TraceEvent[] => lines.map((line) => JSON.parse(line) as TraceEvent);
 
-describe("TraceRecorder · eventos", () => {
-  it("emite eventos con marca de tiempo, secuencia, ejecución, ámbito y datos redactados", () => {
+describe("TraceRecorder events", () => {
+  it("records timestamps, sequence numbers, run IDs, scopes, and redacted data", () => {
     const { tracer, sink, redactor, time } = make({ streaming: true });
     redactor.addSecret("topsecret");
     time.now += 50;
@@ -33,45 +33,45 @@ describe("TraceRecorder · eventos", () => {
     const [first, second] = parse(sink.lines);
     assert.deepEqual(
       { ...first, t: undefined },
-      { t: undefined, seq: 1, run: "run1", level: "info", scope: "moodle.http", name: "request", data: { path: "/a?x=[REDACTADO]", hop: 0 } },
+      { t: undefined, seq: 1, run: "run1", level: "info", scope: "moodle.http", name: "request", data: { path: "/a?x=[REDACTED]", hop: 0 } },
     );
     assert.equal(first!.t, "2026-11-10T10:00:00.050Z");
     assert.equal(second!.seq, 2);
     assert.equal(second!.data, undefined);
   });
 
-  it("sin streaming conserva los eventos en memoria y los escribe en flush()", () => {
+  it("buffers events in non-streaming mode until flush()", () => {
     const { tracer, sink } = make();
     tracer.event("info", "a", "uno");
     assert.deepEqual(sink.lines, []);
     assert.equal(tracer.flush(), sink.location());
     assert.equal(parse(sink.lines).length, 1);
     tracer.flush();
-    assert.equal(sink.lines.length, 1, "un segundo flush no duplica");
+    assert.equal(sink.lines.length, 1, "A second flush does not duplicate events");
   });
 
-  it("con streaming flush() no vuelve a escribir lo ya emitido", () => {
+  it("does not write streamed events again on flush()", () => {
     const { tracer, sink } = make({ streaming: true });
     tracer.event("info", "a", "uno");
     tracer.flush();
     assert.equal(sink.lines.length, 1);
   });
 
-  it("el anillo en memoria descarta lo más antiguo al superar su tamaño", () => {
+  it("evicts the oldest entries when the ring reaches capacity", () => {
     const { tracer, sink } = make({ ringSize: 3 });
     for (let i = 1; i <= 5; i += 1) tracer.event("info", "a", `e${i}`);
     tracer.flush();
     assert.deepEqual(parse(sink.lines).map((e) => e.name), ["e3", "e4", "e5"]);
   });
 
-  it("recuerda si hubo errores", () => {
+  it("tracks whether errors occurred", () => {
     const { tracer } = make();
     assert.equal(tracer.hasErrors(), false);
     tracer.event("error", "a", "boom");
     assert.equal(tracer.hasErrors(), true);
   });
 
-  it("with() añade contexto a cada evento y comparte secuencia y anillo", () => {
+  it("adds context while sharing the event sequence and ring", () => {
     const { tracer, sink } = make({ streaming: true });
     const child = tracer.with({ item: "cm7" }).with({ stage: "fetch" });
     tracer.event("info", "a", "padre");
@@ -82,7 +82,7 @@ describe("TraceRecorder · eventos", () => {
     assert.equal(kid!.seq, 2);
   });
 
-  it("addSecret registra el secreto para todo lo que se emita después", () => {
+  it("applies new secrets to subsequent events", () => {
     const { tracer, sink } = make({ streaming: true });
     tracer.addSecret("cookie-value-123");
     tracer.event("info", "a", "x", { header: "Cookie: cookie-value-123" });
@@ -90,8 +90,8 @@ describe("TraceRecorder · eventos", () => {
   });
 });
 
-describe("TraceRecorder · spans", () => {
-  it("un span correcto emite inicio y fin con la duración y devuelve el resultado", async () => {
+describe("TraceRecorder spans", () => {
+  it("records the elapsed time and returns the result of a completed span", async () => {
     const { tracer, sink, time } = make({ streaming: true });
     const result = await tracer.span("catalog", "load", { id: "9" }, async () => {
       time.now += 120;
@@ -104,7 +104,7 @@ describe("TraceRecorder · spans", () => {
     assert.equal(events[1]!.ms, 120);
   });
 
-  it("un span fallido emite el error con su cadena de causas y relanza el mismo error", async () => {
+  it("records a failed span and its cause chain and rethrows the same error", async () => {
     const { tracer, sink } = make({ streaming: true });
     const failure = new Error("alto nivel", { cause: new TypeError("causa raíz") });
     await assert.rejects(tracer.span("catalog", "load", {}, async () => { throw failure; }), (e) => e === failure);
@@ -114,14 +114,14 @@ describe("TraceRecorder · spans", () => {
     assert.match(fail.error!.stack ?? "", /alto nivel/);
   });
 
-  it("serializa valores lanzados que no son Error", async () => {
+  it("serializes thrown values that are not Error instances", async () => {
     const { tracer, sink } = make({ streaming: true });
-    await assert.rejects(tracer.span("a", "b", {}, () => Promise.reject("texto suelto")));
+    await assert.rejects(tracer.span("a", "b", {}, () => Promise.reject("plain text")));
     const fail = parse(sink.lines).find((e) => e.name === "b.fail")!;
-    assert.deepEqual(fail.error, { name: "non-error", message: "texto suelto", chain: ["non-error: texto suelto"] });
+    assert.deepEqual(fail.error, { name: "non-error", message: "plain text", chain: ["non-error: plain text"] });
   });
 
-  it("redacta secretos dentro de mensajes de error", async () => {
+  it("redacts secrets from error messages", async () => {
     const { tracer, sink, redactor } = make({ streaming: true });
     redactor.addSecret("sk-123456");
     await assert.rejects(tracer.span("a", "b", {}, async () => { throw new Error("falló con sk-123456"); }));
@@ -129,15 +129,15 @@ describe("TraceRecorder · spans", () => {
   });
 });
 
-describe("TraceRecorder · capturas y robustez", () => {
-  it("snapshot guarda el contenido redactado y truncado solo si la captura está activa", () => {
+describe("TraceRecorder snapshots and error handling", () => {
+  it("redacts and truncates snapshots when capture is enabled", () => {
     const on = make({ capture: true });
     on.redactor.addSecret("topsecret");
     on.tracer.snapshot("courses-page", `hola topsecret ${"x".repeat(300_000)}`, { status: 200 });
     assert.equal(on.sink.snapshots.length, 1);
     const [snap] = on.sink.snapshots;
     assert.equal(snap!.name, "courses-page");
-    assert.ok(snap!.content.startsWith("hola [REDACTADO] "));
+    assert.ok(snap!.content.startsWith("hola [REDACTED] "));
     assert.ok(snap!.content.length < 210_000 && snap!.content.endsWith("[...truncated]"));
 
     const off = make({ capture: false });
@@ -145,7 +145,7 @@ describe("TraceRecorder · capturas y robustez", () => {
     assert.equal(off.sink.snapshots.length, 0);
   });
 
-  it("un sink que falla nunca rompe la aplicación", () => {
+  it("continues when the trace sink fails", () => {
     const sink = new MemoryTraceSink();
     sink.failing = true;
     const { tracer } = make({ streaming: true, sink });
@@ -156,7 +156,7 @@ describe("TraceRecorder · capturas y robustez", () => {
 });
 
 describe("NullTracer", () => {
-  it("ejecuta el trabajo y no registra nada", async () => {
+  it("runs work without recording events", async () => {
     const tracer = new NullTracer();
     assert.equal(await tracer.span("a", "b", {}, async () => "ok"), "ok");
     assert.equal(tracer.with({ x: 1 }), tracer);

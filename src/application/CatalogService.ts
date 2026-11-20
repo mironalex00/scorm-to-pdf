@@ -5,10 +5,7 @@ import type { LearningPlatform } from "./ports.ts";
 
 const COURSES_KEY = "courses";
 
-/**
- * Catálogo de cursos en RAM mínima: cada respuesta de la plataforma se guarda comprimida en el
- * almacén y solo se descomprime lo que se consulta. El contenido de un curso se pide al entrar en él.
- */
+/** Loads course contents on demand and keeps a compressed cache in memory. */
 export class CatalogService {
   private readonly platform: LearningPlatform;
   private readonly store: CompressedStore<unknown>;
@@ -51,7 +48,17 @@ export class CatalogService {
     return contents.items.filter((item) => item.sectionNumber === sectionNumber);
   }
 
-  /** Cursos por id exacto o por texto contenido en el nombre, sin distinguir mayúsculas ni acentos. */
+  weeks(contents: CourseContents): { section: Section; items: CourseItem[] }[] {
+    const itemsBySection = new Map<number, CourseItem[]>();
+    for (const item of contents.items) {
+      const items = itemsBySection.get(item.sectionNumber);
+      if (items) items.push(item);
+      else itemsBySection.set(item.sectionNumber, [item]);
+    }
+    return this.sectionsOf(contents).map((section) => ({ section, items: itemsBySection.get(section.number) ?? [] }));
+  }
+
+  /** Matches an exact ID or a name fragment, ignoring case and accents. */
   async find(query: string): Promise<CourseSummary[]> {
     const all = await this.courses();
     const exact = all.filter((course) => course.id === query);

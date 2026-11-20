@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { CliInterruptions, withProcessSignals } from "../src/cli/CliInterruptions.ts";
 import { AsciiEngine } from "../src/extensions/ascii/AsciiEngine.ts";
 import type { AsciiClip } from "../src/extensions/ascii/index.ts";
 import { decodeFrames, probe } from "../src/extensions/ascii/media.ts";
 import { PortableMediaRuntime, withMediaTools } from "../src/extensions/ascii/runtime.ts";
-import { es } from "../src/i18n/es.ts";
+import { en } from "../src/i18n/en.ts";
 import { NodeFileSink } from "../src/infra/NodeFileSink.ts";
 
 const directory = fileURLToPath(new URL("../src/extensions/ascii/", import.meta.url));
@@ -20,19 +21,19 @@ const scenes = {
   farewell: {
     file: "bear_hoop.png",
     poses: [0, 1, -1],
-    // Gira la proyección del aro sin desplazar la cara ni los pies del oso.
+    // Tilt the hoop around the bear's waist.
     shift: (x: number, y: number) => (x - 0.51) * 0.22 * band(y, 0.71, 0.14),
   },
   downloadFailure: {
     file: "hammer_point.png",
     poses: [0, 1],
-    // Levanta la mano del martillo. El dedo de la otra mano se mantiene visible.
+    // Move the hammer arm while keeping the pointing hand in view.
     shift: (x: number, y: number) => -0.085 * band(x, 0.27, 0.19) * band(y, 0.86, 0.19),
   },
   unexpectedFailure: {
     file: "startled_boy.png",
     poses: [0, 1],
-    // Sube los brazos en los márgenes mientras el rostro permanece fijo.
+    // Raise both arms without moving the face.
     shift: (x: number, y: number) => -0.09 * Math.max(band(x, 0.08, 0.28), band(x, 0.92, 0.28)) * band(y, 0.84, 0.22),
   },
 } as const;
@@ -56,34 +57,38 @@ function pose(
   return frame;
 }
 
-const runtime = new PortableMediaRuntime();
-const clips: Record<string, AsciiClip> = {};
-await withMediaTools(runtime, async (tools) => {
-  for (const [name, scene] of Object.entries(scenes)) {
-    const source = join(directory, "content", scene.file);
-    const { width, height, gif } = await probe(tools, source);
-    const { rows, w, h } = engine.size(width, height, cols, 0.44);
-    const decoded = decodeFrames(tools, source, {
-      width: w, height: h, fps, still: true, gif, matte: 255, downscale: width >= w && height >= h,
-    });
-    try {
-      const { value } = await decoded.next();
-      if (!value) throw new Error("No se pudo leer " + scene.file + ".");
-      const frames = scene.poses.map((amount) =>
-        engine.text(engine.frame(pose(value, w, h, amount, scene.shift), cols, rows)).split("\n"),
-      );
-      clips[name] = { cols, rows, fps, frames };
-    } finally {
-      await decoded.return(undefined);
+async function generate(signal: AbortSignal): Promise<void> {
+  const clips: Record<string, AsciiClip> = {};
+  await withMediaTools(new PortableMediaRuntime(), async (tools) => {
+    for (const [name, scene] of Object.entries(scenes)) {
+      const source = join(directory, "content", scene.file);
+      const { width, height, gif } = await probe(tools, source, signal);
+      const { rows, w, h } = engine.size(width, height, cols, 0.44);
+      const decoded = decodeFrames(tools, source, {
+        width: w, height: h, fps, still: true, gif, matte: 255, downscale: width >= w && height >= h, signal,
+      });
+      try {
+        const { value } = await decoded.next();
+        if (!value) throw new Error(`Could not read ${scene.file}.`);
+        const frames = scene.poses.map((amount) =>
+          engine.text(engine.frame(pose(value, w, h, amount, scene.shift), cols, rows)).split("\n"),
+        );
+        clips[name] = { cols, rows, fps, frames };
+      } finally {
+        await decoded.return(undefined);
+      }
     }
-  }
-});
+  }, signal);
 
-const output = [
-  "// Generado por npm run ascii:art desde content/. Edita el generador, no estos cuadros.",
-  'import type { AsciiClip } from "./index.ts";',
-  "",
-  "export const asciiAnimations = " + JSON.stringify(clips, null, 2) + " satisfies Record<string, AsciiClip>;",
-  "",
-].join("\n");
-await new NodeFileSink({ messages: es }).write(join(directory, "generatedAnimations.ts"), Buffer.from(output));
+  const output = [
+    "// Generated from content/ by npm run ascii:art.",
+    'import type { AsciiClip } from "./index.ts";',
+    "",
+    "export const asciiAnimations = " + JSON.stringify(clips, null, 2) + " satisfies Record<string, AsciiClip>;",
+    "",
+  ].join("\n");
+  await new NodeFileSink({ messages: en, signal }).write(join(directory, "generatedAnimations.ts"), Buffer.from(output));
+}
+
+const interruptions = new CliInterruptions();
+process.exitCode = await withProcessSignals(() => interruptions.run(generate), (code) => { interruptions.request(code); });

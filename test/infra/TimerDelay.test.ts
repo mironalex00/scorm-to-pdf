@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { TimerDelay } from "../../src/infra/TimerDelay.ts";
 
 describe("TimerDelay", () => {
-  it("resuelve cuando transcurre el tiempo pedido", async () => {
+  it("resolves after the requested delay", async () => {
     mock.timers.enable({ apis: ["setTimeout"] });
     try {
       let resolved = false;

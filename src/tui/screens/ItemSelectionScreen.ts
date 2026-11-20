@@ -11,11 +11,13 @@ export interface Week {
 
 const DEFAULT_PAGE = 5;
 
-/** Selección múltiple de contenidos agrupados por semana (de menor a mayor). */
+/** Selects materials grouped by course section. */
 export class ItemSelectionScreen implements Screen<CourseItem[]> {
   private readonly title: string;
   private readonly weeks: readonly Week[];
   private readonly flat: readonly CourseItem[];
+  private readonly rows: readonly (string | number)[];
+  private readonly itemRows: readonly number[];
   private readonly marked: Set<string>;
   private readonly layout: FrameLayout;
   private readonly messages: Messages;
@@ -29,7 +31,20 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
   constructor(deps: { title: string; weeks: readonly Week[]; marked: ReadonlySet<string>; layout: FrameLayout; messages: Messages; skipEmpty?: boolean; position?: string }) {
     this.title = deps.title;
     this.weeks = deps.weeks.filter((week) => week.items.length > 0);
-    this.flat = this.weeks.flatMap((week) => week.items);
+    const flat: CourseItem[] = [];
+    const rows: (string | number)[] = [];
+    const itemRows: number[] = [];
+    for (const { section, items } of this.weeks) {
+      rows.push(deps.messages.commands.weekHeading({ number: String(section.number), title: section.title }));
+      for (const item of items) {
+        itemRows.push(rows.length);
+        rows.push(flat.length);
+        flat.push(item);
+      }
+    }
+    this.flat = flat;
+    this.rows = rows;
+    this.itemRows = itemRows;
     this.marked = new Set(deps.marked);
     this.layout = deps.layout;
     this.messages = deps.messages;
@@ -49,22 +64,14 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
       return this.layout.compose({ title: this.title, subtitle: this.position, body: [tui.noItems()], footer, size });
     }
 
-    const rows: Array<{ text: string; selected: boolean }> = [];
-    let cursorRow = 0;
-    let index = 0;
-    for (const week of this.weeks) {
-      rows.push({ text: commands.weekHeading({ number: String(week.section.number), title: week.section.title }), selected: false });
-      for (const item of week.items) {
-        const selected = index === this.cursor;
-        if (selected) cursorRow = rows.length;
-        const kind = item.kind === "scorm" ? commands.kindScorm() : commands.kindResource();
-        rows.push({ text: `${selected ? ">" : " "} [${this.marked.has(item.id) ? "x" : " "}] ${item.name}  (${kind})`, selected });
-        index += 1;
-      }
-    }
-
-    const { start, end } = this.scroll.window(cursorRow, rows.length, this.page);
-    const body = rows.slice(start, end).map((row) => this.layout.row(row.text, size, row.selected));
+    const { start, end } = this.scroll.window(this.itemRows[this.cursor]!, this.rows.length, this.page);
+    const body = this.rows.slice(start, end).map((row) => {
+      if (typeof row === "string") return this.layout.row(row, size, false);
+      const item = this.flat[row]!;
+      const selected = row === this.cursor;
+      const kind = item.kind === "scorm" ? commands.kindScorm() : commands.kindResource();
+      return this.layout.row(`${selected ? ">" : " "} [${this.marked.has(item.id) ? "x" : " "}] ${item.name}  (${kind})`, size, selected);
+    });
     const status = this.notice ?? tui.selectedCount({ count: String(this.marked.size) });
     const subtitle = this.position === undefined ? status : `${this.position} · ${status}`;
     return this.layout.compose({ title: this.title, subtitle, body, footer: tui.keysItems(), size });
@@ -126,7 +133,7 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
     return this.weeks.find((week) => week.items.includes(item))!.items;
   }
 
-  /** Si todos los elementos ya están marcados los desmarca; si no, los marca todos. */
+  /** Clears a fully selected group or selects every item in it. */
   private toggle(items: readonly CourseItem[]): void {
     const allMarked = items.every((item) => this.marked.has(item.id));
     for (const item of items) {

@@ -12,6 +12,7 @@ import type { AsciiClip } from "../extensions/ascii/index.ts";
 import { fitAsciiFrame } from "../extensions/ascii/viewport.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { OutputStream } from "../infra/ConsoleLogger.ts";
+import { plainLine } from "../infra/plainText.ts";
 import type { FrameLayout } from "./FrameLayout.ts";
 import { ScreenRunner } from "./ScreenRunner.ts";
 import { CourseSelectionScreen } from "./screens/CourseSelectionScreen.ts";
@@ -38,9 +39,7 @@ type Destination = { kind: "cancelled" } | { kind: "back" } | { kind: "path"; pa
 
 const CANCELLED_EXIT_CODE = 130;
 const BAR_WIDTH = 30;
-/**
- * Selección de cursos y de contenidos por curso, seguida de una confirmación y un destino comunes.
- */
+/** Selects courses and materials, then confirms one destination for the batch. */
 export class TuiApplication {
   private readonly terminal: Terminal;
   private readonly runner: ScreenRunner;
@@ -54,6 +53,7 @@ export class TuiApplication {
   private readonly stdout: OutputStream;
   private readonly stderr: OutputStream;
   private readonly cwd: string;
+  private readonly signal: AbortSignal | undefined;
 
   constructor(deps: {
     terminal: Terminal;
@@ -67,9 +67,10 @@ export class TuiApplication {
     stdout: OutputStream;
     stderr: OutputStream;
     cwd: string;
+    signal?: AbortSignal;
   }) {
     this.terminal = deps.terminal;
-    this.runner = new ScreenRunner({ terminal: deps.terminal });
+    this.runner = new ScreenRunner({ terminal: deps.terminal, signal: deps.signal });
     this.catalog = deps.catalog;
     this.batch = deps.batch;
     this.namer = deps.namer;
@@ -80,6 +81,7 @@ export class TuiApplication {
     this.stdout = deps.stdout;
     this.stderr = deps.stderr;
     this.cwd = deps.cwd;
+    this.signal = deps.signal;
   }
 
   async run(): Promise<number> {
@@ -91,8 +93,13 @@ export class TuiApplication {
         await this.animate(this.messages.tui.farewell(), asciiAnimations.farewell, 3);
       }
     } catch (error) {
-      await this.animate(this.messages.tui.unexpectedTitle(), asciiAnimations.unexpectedFailure);
-      throw error;
+      if (this.signal?.aborted) {
+        if (this.signal.reason === CANCELLED_EXIT_CODE) outcome = { kind: "cancelled" };
+        else throw error;
+      } else {
+        await this.animate(this.messages.tui.unexpectedTitle(), asciiAnimations.unexpectedFailure);
+        throw error;
+      }
     } finally {
       this.terminal.close();
     }
@@ -112,7 +119,7 @@ export class TuiApplication {
 
     for (;;) {
       if (step === "course") {
-        const withMaterials = new Set([...selections.values()].filter(({ items }) => items.length > 0).map(({ course }) => course.id));
+        const withMaterials = new Set(selections.keys());
         const result = await this.runner.run(new CourseSelectionScreen({
           courses, marked: markedCourses, withMaterials, discardMaterials: (id) => selections.delete(id),
           layout: this.layout, messages: this.messages,
@@ -124,20 +131,17 @@ export class TuiApplication {
       } else if (step === "items") {
         const course = chosen[courseIndex]!;
         const contents = await this.loading(tui.loadingContents({ course: course.name }), () => this.catalog.contents(course));
-        const previous = selections.get(course.id)?.items ?? [];
-        const marked = new Set(previous.map((item) => item.id));
+        const previous = new Set(selections.get(course.id)?.items.map((item) => item.id));
+        const marked = new Set(contents.items.filter((item) => previous.has(item.id)).map((item) => item.id));
         const position = chosen.length > 1
           ? tui.coursePosition({ current: String(courseIndex + 1), total: String(chosen.length) })
           : undefined;
         const screen = this.itemsScreen(course, contents, marked, position);
         const result = await this.runner.run(screen);
         if (result.kind === "cancel") return { kind: "cancelled" };
-        selections.set(course.id, {
-          course,
-          sections: this.catalog.sectionsOf(contents),
-          items: result.kind === "back" ? screen.selection() : result.value,
-          allItems: contents.items,
-        });
+        const items = result.kind === "back" ? screen.selection() : result.value;
+        if (items.length === 0) selections.delete(course.id);
+        else selections.set(course.id, { course, sections: this.catalog.sectionsOf(contents), items, allItems: contents.items });
         if (result.kind === "back") {
           if (courseIndex === 0) step = "course";
           else courseIndex -= 1;
@@ -147,7 +151,7 @@ export class TuiApplication {
           } else {
             selected = courses.flatMap(({ id }) => {
               const selection = selections.get(id);
-              return selection && selection.items.length > 0 ? [selection] : [];
+              return selection ? [selection] : [];
             });
             step = selected.length === 0 ? "course" : "confirm";
           }
@@ -166,12 +170,9 @@ export class TuiApplication {
   }
 
   private itemsScreen(course: CourseSummary, contents: CourseContents, marked: ReadonlySet<string>, position: string | undefined): ItemSelectionScreen {
-    const weeks = this.catalog
-      .sectionsOf(contents)
-      .map((section) => ({ section, items: this.catalog.itemsIn(contents, section.number) }));
     return new ItemSelectionScreen({
       title: this.messages.tui.itemsTitle({ course: course.name }),
-      weeks,
+      weeks: this.catalog.weeks(contents),
       marked,
       skipEmpty: position !== undefined,
       position,
@@ -248,15 +249,20 @@ export class TuiApplication {
     let failed = 0;
     let aborted = false;
     this.logger.onProgress((update) => this.showProgress({ ...update, done: outcomes.length + update.done, total }));
-    this.showProgress({ done: 0, total, label: "" });
-    for (const { course, sections, items, allItems } of selected) {
-      const result = await this.batch.run(items, join(contentRoot, folders.get(course.id)!), sections, { allItems });
-      outcomes.push(...result.outcomes);
-      downloaded += result.downloaded;
-      skipped += result.skipped;
-      failed += result.failed;
-      aborted = result.aborted;
-      if (aborted) break;
+    try {
+      this.showProgress({ done: 0, total, label: "" });
+      for (const { course, sections, items, allItems } of selected) {
+        this.signal?.throwIfAborted();
+        const result = await this.batch.run(items, join(contentRoot, folders.get(course.id)!), sections, { allItems });
+        for (const outcome of result.outcomes) outcomes.push(outcome);
+        downloaded += result.downloaded;
+        skipped += result.skipped;
+        failed += result.failed;
+        aborted = result.aborted;
+        if (aborted) break;
+      }
+    } finally {
+      this.logger.onProgress(undefined);
     }
     const report = { outcomes, downloaded, skipped, failed, aborted };
     if (report.failed > 0 || report.aborted) {
@@ -269,7 +275,6 @@ export class TuiApplication {
   private showProgress(update: ProgressUpdate): void {
     const size = this.terminal.size();
     const width = Math.min(BAR_WIDTH, Math.max(5, size.columns - 12));
-    // La selección nunca está vacía (la pantalla de contenidos lo exige), así que el total es >= 1.
     const filled = Math.floor((update.done / update.total) * width);
     const bar = `${"█".repeat(filled)}${"░".repeat(width - filled)} ${update.done}/${update.total}`;
     this.terminal.render(
@@ -314,10 +319,10 @@ export class TuiApplication {
     }
     const { report, dest } = outcome;
     if (report.failed === 0 && !report.aborted) {
-      this.stdout.write(`${tui.success({ downloaded: String(report.downloaded), skipped: String(report.skipped), dest })}\n`);
+      this.stdout.write(`${tui.success({ downloaded: String(report.downloaded), skipped: String(report.skipped), dest: plainLine(dest) })}\n`);
       return 0;
     }
-    for (const line of this.failureLines(report)) this.stderr.write(`${line}\n`);
+    for (const line of this.failureLines(report)) this.stderr.write(`${plainLine(line)}\n`);
     this.stderr.write(
       `${commands.summary({ downloaded: String(report.downloaded), skipped: String(report.skipped), failed: String(report.failed) })}\n`,
     );
@@ -334,7 +339,7 @@ export class TuiApplication {
         footer: "",
         size,
       }));
-      await setTimeout(index === timeline.length - 1 ? 320 : 1000 / clip.fps);
+      await setTimeout(index === timeline.length - 1 ? 320 : 1000 / clip.fps, undefined, { signal: this.signal });
     }
   }
 }

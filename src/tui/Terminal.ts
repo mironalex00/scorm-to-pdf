@@ -4,7 +4,7 @@ export type KeyName =
 
 export interface KeyPress {
   readonly name: KeyName;
-  /** Carácter tecleado (solo con `char` y `space`). */
+  /** Printable value for a character or space key. */
   readonly char?: string;
 }
 
@@ -13,16 +13,16 @@ export interface TerminalSize {
   readonly rows: number;
 }
 
-/** La pantalla y el teclado. En producción son stdin/stdout en modo raw; en las pruebas, un guion de teclas. */
+/** Terminal I/O for interactive sessions and scripted tests. */
 export interface Terminal {
   readonly interactive: boolean;
   size(): TerminalSize;
-  /** Entra en pantalla alternativa con el cursor oculto y el teclado en modo raw. */
+  /** Switches to raw input and the alternate screen. */
   open(): void;
-  /** Restaura la terminal. Debe ser seguro llamarlo aunque no se haya abierto. */
+  /** Restores the original terminal state. Safe to call more than once. */
   close(): void;
   render(lines: readonly string[]): void;
-  readKey(): Promise<KeyPress>;
+  readKey(signal?: AbortSignal): Promise<KeyPress>;
 }
 
 export type ScreenResult<T> =
@@ -31,7 +31,7 @@ export type ScreenResult<T> =
   | { readonly kind: "back" }
   | { readonly kind: "cancel" };
 
-/** Una pantalla es pura: dibuja un estado y reacciona a una tecla; no toca la terminal. */
+/** Renders state and handles keys without terminal I/O. */
 export interface Screen<T> {
   render(size: TerminalSize): string[];
   press(key: KeyPress): ScreenResult<T>;

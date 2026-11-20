@@ -4,7 +4,7 @@ import type { AddressInfo } from "node:net";
 
 export type RequestHandler = (request: IncomingMessage, response: ServerResponse) => void;
 
-/** Servidor HTTP real en 127.0.0.1 con puerto efímero, para probar adaptadores sin mocks. */
+/** Listens on a loopback port for transport tests. */
 export class LocalServer {
   readonly requests: IncomingMessage[] = [];
   private readonly server: Server;
@@ -25,7 +25,13 @@ export class LocalServer {
       handler(request, response);
     });
     local = new LocalServer(server);
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
     return local;
   }
 

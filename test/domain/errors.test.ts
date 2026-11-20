@@ -11,7 +11,7 @@ import {
   errorMessage,
 } from "../../src/domain/errors.ts";
 
-describe("errores del dominio", () => {
+describe("domain errors", () => {
   const cases = [
     { make: () => new UsageError("uso"), exitCode: 2, message: "uso" },
     { make: () => new AuthenticationError("sesión"), exitCode: 3, message: "sesión" },
@@ -23,7 +23,7 @@ describe("errores del dominio", () => {
 
   for (const { make, exitCode, message } of cases) {
     const error = make();
-    it(`${error.constructor.name} sale con código ${exitCode} y conserva nombre y mensaje`, () => {
+    it(`gives ${error.constructor.name} exit code ${exitCode} and preserves its name and message`, () => {
       assert.ok(error instanceof AppError);
       assert.ok(error instanceof Error);
       assert.equal(error.exitCode, exitCode);
@@ -32,24 +32,24 @@ describe("errores del dominio", () => {
     });
   }
 
-  it("DownloadError es reintentable solo si se pide explícitamente", () => {
+  it("makes DownloadError retryable only when requested", () => {
     assert.equal(new DownloadError("x").retryable, false);
     assert.equal(new DownloadError("x", { retryable: true }).retryable, true);
   });
 
-  it("conserva la causa original para depurar", () => {
+  it("preserves the original cause", () => {
     const cause = new TypeError("fetch failed");
     const error = new DownloadError("red", { retryable: true, cause });
     assert.equal(error.cause, cause);
   });
 
   describe("errorMessage", () => {
-    it("devuelve el mensaje de un Error", () => {
+    it("returns an Error's message", () => {
       assert.equal(errorMessage(new TypeError("boom")), "boom");
     });
 
-    it("convierte en texto cualquier valor lanzado que no sea un Error", () => {
-      assert.equal(errorMessage("texto suelto"), "texto suelto");
+    it("converts other thrown values to text", () => {
+      assert.equal(errorMessage("plain text"), "plain text");
       assert.equal(errorMessage(42), "42");
       assert.equal(errorMessage(undefined), "undefined");
     });

@@ -1,5 +1,7 @@
-import { mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
+import { chmod, mkdtemp, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
+import { Writable } from "node:stream";
 import { setTimeout } from "node:timers/promises";
 import { AsciiEngine, CELL_HEIGHT, CELL_WIDTH } from "./AsciiEngine.ts";
 import type { AsciiGrid, AsciiOptions } from "./AsciiEngine.ts";
@@ -55,12 +57,12 @@ async function inspectMedia(tools: MediaTools, source: string, options: MediaOpt
   signal?.throwIfAborted();
   const info = await probe(tools, source, signal);
   const fps = options.fps ?? Math.min(info.fps, 30);
-  if (!Number.isFinite(fps) || fps <= 0 || fps > 60) throw new Error("Los FPS deben estar entre 0 (excluido) y 60.");
+  if (!Number.isFinite(fps) || fps <= 0 || fps > 60) throw new Error("Frame rate must be greater than 0 and no higher than 60.");
   const engine = new AsciiEngine(options);
   const aspect = options.aspect ?? 0.5;
   let columns = options.cols ?? 80;
   if (options.maxRows !== undefined) {
-    if (!Number.isSafeInteger(options.maxRows) || options.maxRows < 1) throw new Error("El límite de filas debe ser positivo.");
+    if (!Number.isSafeInteger(options.maxRows) || options.maxRows < 1) throw new Error("The row limit must be a positive integer.");
     columns = Math.max(1, Math.min(columns, Math.floor(options.maxRows * info.width / (aspect * info.height))));
   }
   const { cols, rows, w, h } = engine.size(info.width, info.height, columns, aspect);
@@ -80,7 +82,7 @@ interface OpenMedia extends Omit<Awaited<ReturnType<typeof inspectMedia>>, "deco
   frames(still?: boolean): AsyncGenerator<AsciiGrid>;
 }
 
-/** Cada iterador mantiene sus ejecutables mientras esté abierto y los elimina al cerrarse. */
+/** The iterator owns its temporary media tools until it finishes or is closed. */
 export async function openAsciiMedia(input: string, options: MediaOptions = {}, context: ConversionContext = {}): Promise<OpenMedia> {
   const source = mediaInput(input, context.cwd);
   const runtime = context.runtime ?? new PortableMediaRuntime({ cwd: context.cwd });
@@ -113,23 +115,25 @@ async function withMedia<T>(
 
 async function firstFrame(media: OpenMedia): Promise<AsciiGrid> {
   for await (const frame of media.frames(true)) return frame;
-  throw new Error("La entrada no produjo ningún cuadro.");
+  throw new Error("The input produced no frames.");
 }
 
 async function atomicOutput(path: string, write: (temporary: string) => Promise<void>, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted();
   const dir = await mkdtemp(join(dirname(path), ".ascii-"));
   const temporary = join(dir, "output" + extname(path));
   try {
     await write(temporary);
+    await chmod(temporary, 0o600);
     signal?.throwIfAborted();
     await rename(temporary, path);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
   }
 }
 
 function validFrameCap(value: number): void {
-  if (!Number.isSafeInteger(value) || value < 1 || value > 10_000) throw new Error("--max-frames requiere un entero de 1 a 10000.");
+  if (!Number.isSafeInteger(value) || value < 1 || value > 10_000) throw new Error("--max-frames requires an integer from 1 to 10000.");
 }
 
 async function collect(media: OpenMedia, maxFrames: number, render: (frame: AsciiGrid) => string): Promise<string[]> {
@@ -138,11 +142,11 @@ async function collect(media: OpenMedia, maxFrames: number, render: (frame: Asci
   for await (const frame of media.frames()) {
     const text = render(frame);
     bytes += Buffer.byteLength(text, "utf8");
-    if (bytes > MAX_EXPORT_BYTES) throw new Error("La animación es demasiado grande; reduce las columnas o --max-frames.");
+    if (bytes > MAX_EXPORT_BYTES) throw new Error("The animation is too large. Reduce the columns or --max-frames.");
     frames.push(text);
     if (frames.length === maxFrames) break;
   }
-  if (frames.length === 0) throw new Error("La entrada no produjo ningún cuadro.");
+  if (frames.length === 0) throw new Error("The input produced no frames.");
   return frames;
 }
 
@@ -176,7 +180,7 @@ async function rasterOutput(
       yield media.engine.raster(frame, scale).buf;
       if (++count >= (options.maxFrames ?? Infinity)) break;
     }
-    if (count === 0) throw new Error("La entrada no produjo ningún cuadro.");
+    if (count === 0) throw new Error("The input produced no frames.");
   }
   const audio = media.info.hasAudio && format !== "png" && format !== "gif" && !options.mute ? media.source : undefined;
   await encodeFrames(tools, output, {
@@ -193,21 +197,24 @@ async function avoidInputOverwrite(source: string, out: string): Promise<void> {
       return out;
     }),
   ]);
-  if (actualSource === actualOut) throw new Error("La entrada y la salida no pueden ser el mismo archivo.");
+  if (actualSource === actualOut) throw new Error("Input and output must be different files.");
 }
 
-/** Convierte con FFmpeg. Sin salida, reproduce en una terminal o escribe el primer cuadro si se redirige stdout. */
+/**
+ * Converts media with FFmpeg. Without an output path, plays on a terminal or prints the first frame
+ * to a pipe.
+ */
 export async function run(input: string, options: ConversionOptions = {}, context: ConversionContext = {}): Promise<void> {
   const cwd = context.cwd ?? process.cwd();
   const stdout = context.stdout ?? process.stdout;
   const out = options.out === undefined ? undefined : resolve(cwd, options.out);
   const format = out === undefined ? "" : extname(out).slice(1).toLowerCase();
   const raster = isRasterFormat(format);
-  if (out !== undefined && !raster && !TEXT.has(format)) throw new Error("Formato de salida no soportado: " + (format || "(sin extensión)") + ".");
+  if (out !== undefined && !raster && !TEXT.has(format)) throw new Error("Unsupported output format: " + (format || "(no extension)") + ".");
   const maxFrames = options.maxFrames ?? 600;
   validFrameCap(maxFrames);
   if (options.scale !== undefined && (!Number.isSafeInteger(options.scale) || options.scale < 1 || options.scale > 8)) {
-    throw new Error("--scale requiere un entero de 1 a 8.");
+    throw new Error("--scale requires an integer from 1 to 8.");
   }
 
   const source = mediaInput(input, cwd);
@@ -248,7 +255,6 @@ async function showTerminal(media: OpenMedia, options: ConversionOptions, stdout
     return;
   }
   let count = 0;
-  let shown = false;
   stdout.write("\x1b[?1049h\x1b[?25l");
   try {
     do {
@@ -256,13 +262,15 @@ async function showTerminal(media: OpenMedia, options: ConversionOptions, stdout
       let frameNumber = 0;
       for await (const grid of media.frames()) {
         const lineCount = Math.max(1, (stdout.rows || grid.rows + 1) - 1);
-        stdout.write("\x1b[H" + media.engine.ansi(grid).split("\n").slice(0, lineCount).join("\n") + "\x1b[J");
-        shown = true;
+        const frame = "\x1b[H" + media.engine.ansi(grid).split("\n").slice(0, lineCount).join("\n") + "\x1b[J";
+        if (stdout.write(frame) === false && stdout instanceof Writable && !stdout.destroyed) {
+          await once(stdout, "drain", { signal: options.signal });
+        }
         const wait = start + (++frameNumber) * 1000 / media.fps - performance.now();
         if (wait > 0) await setTimeout(wait, undefined, { signal: options.signal });
         if (++count >= (options.maxFrames ?? Infinity)) return;
       }
-      if (!shown) throw new Error("La entrada no produjo ningún cuadro.");
+      if (frameNumber === 0) throw new Error("The input produced no frames.");
     } while (options.loop);
   } finally {
     stdout.write("\x1b[0m\x1b[?25h\x1b[?1049l");

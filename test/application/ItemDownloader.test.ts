@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { FileNamer } from "../../src/application/FileNamer.ts";
 import { ItemDownloader } from "../../src/application/ItemDownloader.ts";
 import { MoodleSession } from "../../src/application/MoodleSession.ts";
@@ -8,7 +9,7 @@ import { SlideDownloader } from "../../src/application/SlideDownloader.ts";
 import { SlideListParser } from "../../src/application/SlideListParser.ts";
 import { SlidesToPdf } from "../../src/application/SlidesToPdf.ts";
 import { DownloadError } from "../../src/domain/errors.ts";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import { JpegInspector } from "../../src/pdf/JpegInspector.ts";
 import { PdfBuilder } from "../../src/pdf/PdfBuilder.ts";
 import { NullTracer } from "../../src/tracing/NullTracer.ts";
@@ -27,25 +28,25 @@ function make() {
   const logger = new MemoryLogger();
   const http = new FakeHttpClient()
     .on(`${ROOT}/slides/a.jpg`, okResponse(makeJpeg({ width: 1280, height: 720 }), "image/jpeg"));
-  const session = new MoodleSession({ messages: es, tracer: new NullTracer(), http, cookie: SessionCookie.parse("abc", es), baseUrl: new URL("https://moodle.example.org/") });
+  const session = new MoodleSession({ messages: en, tracer: new NullTracer(), http, cookie: SessionCookie.parse("abc", en), baseUrl: new URL("https://moodle.example.org/") });
   const downloader = new ItemDownloader({
     platform,
     sink,
     tracer: new NullTracer(),
     namer: new FileNamer({ fallbackName: "archivo", maxNameBytes: 100 }),
     slides: new SlidesToPdf({
-      messages: es,
+      messages: en,
       logger,
-      parser: new SlideListParser({ messages: es, maxSlides: 10 }),
-      downloader: new SlideDownloader({ messages: es, session, logger, delay: new RecordingDelay(), settings: { concurrency: 1, maxImageBytes: 1_000_000, retries: 0, backoffMs: 1 } }),
-      pdfBuilder: new PdfBuilder({ messages: es, pageWidth: 960, pageHeight: 540, inspector: new JpegInspector({ messages: es }) }),
+      parser: new SlideListParser({ messages: en, maxSlides: 10 }),
+      downloader: new SlideDownloader({ messages: en, session, logger, delay: new RecordingDelay(), settings: { concurrency: 1, maxImageBytes: 1_000_000, retries: 0, backoffMs: 1 } }),
+      pdfBuilder: new PdfBuilder({ messages: en, pageWidth: 960, pageHeight: 540, inspector: new JpegInspector({ messages: en }) }),
     }),
   });
   return { platform, sink, downloader };
 }
 
 describe("ItemDownloader", () => {
-  it("un archivo directo se guarda en <destino>/<sección>/<nombre><ext> tal cual, sin conversión", async () => {
+  it("writes a direct resource as received under its section folder", async () => {
     const { platform, sink, downloader } = make();
     const bytes = Uint8Array.of(1, 2, 3);
     platform.fetched["1"] = { kind: "file", bytes, fileName: "origen.pdf", contentType: "application/pdf" };
@@ -54,7 +55,7 @@ describe("ItemDownloader", () => {
     assert.deepEqual([...sink.files.get("out/3/Complementar.pdf")!], [1, 2, 3]);
   });
 
-  it("un SCORM de diapositivas se convierte en PDF con el flujo actual y se guarda como <nombre>.pdf", async () => {
+  it("converts SCORM slides and writes a PDF under the item name", async () => {
     const { platform, sink, downloader } = make();
     platform.fetched["2"] = { kind: "slides", entryUrl: new URL(`${ROOT}/index.html`), html: buildDeckHtml({ slides: [{ src: "slides/a.jpg" }] }) };
     const outcome = await downloader.download(item("2", "scorm", 1), { destRoot: "out", baseName: "Curs 5" });
@@ -63,7 +64,7 @@ describe("ItemDownloader", () => {
     assert.equal(Buffer.from(sink.files.get("out/1/Curs 5.pdf")!).subarray(0, 4).toString("latin1"), "%PDF");
   });
 
-  it("si el archivo ya existe lo omite sin sobrescribirlo", async () => {
+  it("skips an existing file and preserves its contents", async () => {
     const { platform, sink, downloader } = make();
     platform.fetched["1"] = { kind: "file", bytes: Uint8Array.of(9), fileName: "a.pdf", contentType: "application/pdf" };
     sink.files.set("out/1/Hecho.pdf", Uint8Array.of(7));
@@ -71,7 +72,19 @@ describe("ItemDownloader", () => {
     assert.deepEqual([outcome.status, [...sink.files.get("out/1/Hecho.pdf")!]], ["skipped", [7]]);
   });
 
-  it("los errores de la plataforma se propagan para que el lote los registre", async () => {
+  it("skips an existing SCORM PDF before fetching the activity", async () => {
+    const { platform, sink, downloader } = make();
+    const scorm = item("2", "scorm", 1);
+    const path = join("out", "1", "Curs 5", "Curs 5.pdf");
+    const bytes = Uint8Array.of(7);
+    sink.files.set(path, bytes);
+    const outcome = await downloader.download(scorm, { destRoot: "out", baseName: "Curs 5", groupByItem: true });
+    assert.deepEqual(outcome, { item: scorm, status: "skipped", path });
+    assert.deepEqual(platform.calls.fetchItem, []);
+    assert.deepEqual(sink.files.get(path), bytes);
+  });
+
+  it("passes platform errors to the batch downloader", async () => {
     const { platform, downloader } = make();
     platform.fetched["1"] = new DownloadError("falló");
     await assert.rejects(downloader.download(item("1", "resource", 1), { destRoot: "out", baseName: "X" }), DownloadError);

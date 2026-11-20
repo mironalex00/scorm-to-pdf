@@ -22,30 +22,30 @@ import type { ResolvedPlatform } from "./extensions/ExtensionRegistry.ts";
 import { extension as utcluj } from "./extensions/ro/utcluj/kb/index.ts";
 import { LocaleResolver } from "./i18n/LocaleResolver.ts";
 import type { Messages } from "./i18n/Messages.ts";
-import { es } from "./i18n/es.ts";
+import { en } from "./i18n/en.ts";
 import type { OutputStream } from "./infra/ConsoleLogger.ts";
+import { plainLine, plainOutput } from "./infra/plainText.ts";
 import { CookiePrompt } from "./tui/CookiePrompt.ts";
 import { FrameLayout } from "./tui/FrameLayout.ts";
 import type { Terminal } from "./tui/Terminal.ts";
 import { TuiApplication } from "./tui/TuiApplication.ts";
 import { TuiLogger } from "./tui/TuiLogger.ts";
 import { FileTraceSink } from "./tracing/FileTraceSink.ts";
+import { NullTracer } from "./tracing/NullTracer.ts";
 import { Redactor } from "./tracing/Redactor.ts";
 import { TraceRecorder } from "./tracing/TraceRecorder.ts";
 import type { Tracer } from "./tracing/Tracer.ts";
 import { PROGRAM_NAME, VERSION } from "./version.ts";
 
-const TRACE_RING_SIZE = 500;
-
 export interface CliApplicationDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly stdout: OutputStream;
   readonly stderr: OutputStream;
-  /** Sustituible para pruebas; por defecto, `fetch`. */
+  /** Uses fetch unless a test client is supplied. */
   readonly http?: HttpClient | undefined;
-  /** Carpeta base de las trazas por defecto; por defecto, la actual. */
+  /** Parent directory for default trace paths. */
   readonly cwd?: string | undefined;
-  /** Teclado y pantalla del selector interactivo; sin él (o sin TTY), el selector no está disponible. */
+  /** Interactive input and output for the course selector. */
   readonly terminal?: Terminal | undefined;
   readonly interruptions?: CliInterruptions;
 }
@@ -53,16 +53,12 @@ export interface CliApplicationDeps {
 interface RunState {
   messages: Messages;
   locale: string;
-  tracer: Tracer | undefined;
-  streaming: boolean;
-  announceTrace: boolean;
-  traceDir: string;
+  redactor: Redactor;
+  tracer?: Tracer;
+  diagnosed?: boolean;
 }
 
-/**
- * Raíz de composición: elige idioma, crea la traza, cablea los servicios y despacha la orden.
- * Devuelve el código de salida; no llama a `process.exit`.
- */
+/** Parses and dispatches commands and returns their exit status. */
 export class CliApplication {
   private readonly env: Readonly<Record<string, string | undefined>>;
   private readonly stdout: OutputStream;
@@ -72,7 +68,7 @@ export class CliApplication {
   private readonly interruptions: CliInterruptions;
   private readonly cwd: string;
   private readonly terminal: Terminal | undefined;
-  private readonly locales = new LocaleResolver({ catalogs: { es }, defaultLocale: "es" });
+  private readonly locales = new LocaleResolver({ catalogs: { en }, defaultLocale: "en" });
 
   constructor(deps: CliApplicationDeps) {
     this.env = deps.env;
@@ -86,7 +82,7 @@ export class CliApplication {
   }
 
   async run(argv: readonly string[]): Promise<number> {
-    const state: RunState = { messages: es, locale: "es", tracer: undefined, streaming: false, announceTrace: false, traceDir: "" };
+    const state: RunState = { messages: en, locale: "en", redactor: new Redactor() };
     let code: number;
     try {
       const resolved = this.locales.resolve({ flag: this.peekLang(argv), env: this.env });
@@ -94,9 +90,15 @@ export class CliApplication {
       state.locale = resolved.locale;
       code = await this.execute(argv, state);
     } catch (error) {
-      code = this.report(error, state.messages);
+      code = this.report(error, state);
     }
-    this.finishTrace(code, state);
+    const path = state.tracer?.flush();
+    if (path !== undefined && !state.diagnosed) this.stderr.write(`${state.messages.trace.saved({ path: plainLine(path) })}\n`);
+    else if (path === undefined && state.tracer !== undefined) {
+      this.stderr.write(`${state.messages.trace.unavailable()}\n`);
+      if (state.diagnosed && code === 0) code = 1;
+    }
+    else if (path === undefined && code === 1) this.stderr.write(`${state.messages.trace.enableHint()}\n`);
     return code;
   }
 
@@ -114,8 +116,8 @@ export class CliApplication {
       return 0;
     }
 
-    const redactor = new Redactor();
-    const tracer = this.createTracer(command.global, command.kind === "diagnose", redactor, state);
+    const { redactor } = state;
+    const tracer = this.createTracer(command.global, command.kind === "diagnose", state);
     if (command.kind === "ascii") {
       tracer.event("info", "app", "run.start", { command: command.kind, action: command.request.kind });
       return new AsciiCommand({
@@ -134,33 +136,35 @@ export class CliApplication {
       command: command.kind,
       platform: resolved.extension.id,
       origin: resolved.baseUrl.origin,
-      flags: { quiet: global.quiet, concurrency: global.concurrency, trace: state.streaming },
+      flags: { quiet: global.quiet, concurrency: global.concurrency, trace: state.tracer !== undefined },
     });
 
     if (command.kind === "tui" && !this.terminal?.interactive) throw new UsageError(messages.cli.tuiNeedsTerminal());
-    const layout = new FrameLayout({ colors: !this.env.NO_COLOR });
-    const cookie = await this.obtainCookie(command, messages, layout);
-    for (const value of cookie.secretValues()) tracer.addSecret(value);
+    return this.interruptions.run(async (signal) => {
+      const layout = new FrameLayout({ colors: !this.env.NO_COLOR });
+      const cookie = await this.obtainCookie(command, messages, layout, signal);
+      for (const value of cookie.secretValues()) tracer.addSecret(value);
 
-    const tuiLogger = command.kind === "tui" ? new TuiLogger() : undefined;
-    const services = this.factory.create({
-      messages, locale: state.locale, tracer, redactor, global, resolved, cookie, logger: tuiLogger,
+      const tuiLogger = command.kind === "tui" ? new TuiLogger() : undefined;
+      const services = this.factory.create({
+        messages, locale: state.locale, tracer, redactor, global, resolved, cookie, logger: tuiLogger, signal,
+      });
+      return this.build(command, services, { resolved, messages, tracer, layout, tuiLogger, signal }).run();
     });
-    return this.build(command, services, { resolved, messages, tracer, layout, tuiLogger }).run();
   }
 
-  /** La cookie viene del entorno; solo el selector interactivo puede pedirla si falta. */
-  private async obtainCookie(command: MoodleCommand, messages: Messages, layout: FrameLayout): Promise<SessionCookie> {
+  /** Only interactive sessions can prompt for a missing cookie. */
+  private async obtainCookie(command: MoodleCommand, messages: Messages, layout: FrameLayout, signal: AbortSignal): Promise<SessionCookie> {
     const fromEnv = this.env.MOODLE_COOKIE;
     if (command.kind !== "tui" || (fromEnv ?? "").trim() !== "") return SessionCookie.parse(fromEnv, messages);
-    const typed = await new CookiePrompt({ terminal: this.terminal!, messages, layout }).ask();
+    const typed = await new CookiePrompt({ terminal: this.terminal!, messages, layout, signal }).ask();
     return SessionCookie.parse(typed, messages);
   }
 
   private build(
     command: MoodleCommand,
     services: Services,
-    context: { resolved: ResolvedPlatform; messages: Messages; tracer: Tracer; layout: FrameLayout; tuiLogger: TuiLogger | undefined },
+    context: { resolved: ResolvedPlatform; messages: Messages; tracer: Tracer; layout: FrameLayout; tuiLogger: TuiLogger | undefined; signal: AbortSignal },
   ): Command {
     const { resolved, messages, tracer } = context;
     const { logger, catalog, resolver } = services;
@@ -203,39 +207,27 @@ export class CliApplication {
             stdout: this.stdout,
             stderr: this.stderr,
             cwd: this.cwd,
+            signal: context.signal,
           }),
         });
     }
   }
 
-  private createTracer(global: CommonOptions, forced: boolean, redactor: Redactor, state: RunState): Tracer {
+  private createTracer(global: CommonOptions, forced: boolean, state: RunState): Tracer {
+    if (!global.trace && !forced && global.traceDir === undefined) return new NullTracer(state.redactor);
     const runId = randomBytes(4).toString("hex");
-    state.streaming = global.trace || forced;
-    state.announceTrace = global.trace && !forced;
-    state.traceDir = global.traceDir ?? join(this.cwd, `scorm-trace-${runId}`);
-    const tracer = TraceRecorder.create({
+    const traceDir = global.traceDir ?? join(this.cwd, `scorm-trace-${runId}`);
+    state.diagnosed = forced;
+    state.tracer = TraceRecorder.create({
       runId,
       clock: Date.now,
-      redactor,
-      sink: new FileTraceSink({ dir: state.traceDir }),
-      streaming: state.streaming,
-      captureBodies: state.streaming,
-      ringSize: TRACE_RING_SIZE,
+      redactor: state.redactor,
+      sink: new FileTraceSink({ dir: traceDir }),
+      streaming: true,
+      captureBodies: true,
+      ringSize: 0,
     });
-    state.tracer = tracer;
-    return tracer;
-  }
-
-  /** Deja la traza donde se pueda encontrar: siempre con --trace; si no, solo cuando algo falla de verdad. */
-  private finishTrace(code: number, state: RunState): void {
-    const { tracer, messages } = state;
-    if (tracer === undefined) return;
-    if (state.streaming) {
-      tracer.flush();
-      if (state.announceTrace) this.stderr.write(`${messages.trace.saved({ path: state.traceDir })}\n`);
-    } else if (code !== 0 && code !== 2 && code < 128) {
-      this.stderr.write(`${messages.trace.savedHint({ path: tracer.flush() ?? state.traceDir })}\n`);
-    }
+    return state.tracer;
   }
 
   private peekLang(argv: readonly string[]): string | undefined {
@@ -246,14 +238,15 @@ export class CliApplication {
     return arg.startsWith("--lang=") ? arg.slice("--lang=".length) : argv[index + 1];
   }
 
-  private report(error: unknown, messages: Messages): number {
+  private report(error: unknown, { messages, redactor }: RunState): number {
     if (error instanceof AppError) {
       const hint = error instanceof UsageError ? `\n${messages.app.usageHint()}` : "";
-      this.stderr.write(`${messages.app.errorPrefix()} ${error.message}${hint}\n`);
+      this.stderr.write(`${messages.app.errorPrefix()} ${plainLine(redactor.redact(error.message))}${hint}\n`);
       return error.exitCode;
     }
-    const trace = this.env.DEBUG && error instanceof Error ? `\n${error.stack}` : "";
-    this.stderr.write(`${messages.app.unexpectedError({ detail: errorMessage(error) })}${trace}\n`);
+    const trace = this.env.DEBUG && error instanceof Error && error.stack ? `\n${plainOutput(redactor.redact(error.stack))}` : "";
+    const detail = plainLine(redactor.redact(errorMessage(error)));
+    this.stderr.write(`${messages.app.unexpectedError({ detail })}${trace}\n`);
     return 1;
   }
 }

@@ -40,13 +40,15 @@ import type { Tracer } from "../tracing/Tracer.ts";
 
 const MIB = 1024 * 1024;
 
-/** Valores operativos fijos; lo que el usuario puede cambiar vive en las opciones de la CLI. */
+/** Built-in limits and defaults for service construction. */
 export const SETTINGS = {
   requestTimeoutMs: 30_000,
   maxRevision: 30,
   probeBatchSize: 6,
   maxSlides: 500,
   maxImageBytes: 25 * MIB,
+  maxDeckBytes: 128 * MIB,
+  catalogCacheBytes: 8 * MIB,
   maxFileBytes: 200 * MIB,
   retries: 2,
   backoffMs: 500,
@@ -69,7 +71,7 @@ export interface Services {
   readonly convert: ConvertScormToPdf;
 }
 
-/** Cablea el grafo de servicios de una ejecución. Junto a CliApplication, es la raíz de composición. */
+/** Builds a fresh set of services for each command. */
 export class ServiceFactory {
   private readonly http: HttpClient | undefined;
   private readonly stdout: OutputStream;
@@ -89,13 +91,14 @@ export class ServiceFactory {
     global: GlobalOptions;
     resolved: ResolvedPlatform;
     cookie: SessionCookie;
-    /** Registrador alternativo (la TUI no puede escribir en la salida estándar). */
+    signal?: AbortSignal;
+    /** The interactive selector supplies a logger that does not write to stdout. */
     logger?: Logger | undefined;
   }): Services {
-    const { messages, tracer, global, resolved } = input;
+    const { messages, tracer, global, resolved, signal } = input;
     const http = this.http ?? new FetchHttpClient({ timeoutMs: SETTINGS.requestTimeoutMs, messages });
     const logger = input.logger ?? new ConsoleLogger({ stdout: this.stdout, stderr: this.stderr, quiet: global.quiet, messages });
-    const session = new MoodleSession({ http, cookie: input.cookie, baseUrl: resolved.baseUrl, messages, tracer });
+    const session = new MoodleSession({ http, cookie: input.cookie, baseUrl: resolved.baseUrl, messages, tracer, signal });
 
     const html = new HtmlParser();
     const locator = new PluginfileLocator({ maxPrefix: SETTINGS.maxUrlPrefix });
@@ -120,11 +123,12 @@ export class ServiceFactory {
 
     const catalog = new CatalogService({
       platform,
-      store: new CompressedStore({ redactor: input.redactor }),
+      store: new CompressedStore({ redactor: input.redactor, maxBytes: SETTINGS.catalogCacheBytes }),
       locale: input.locale,
       tracer,
     });
-    const pipeline = (pipelineLogger: Logger): SlidesToPdf =>
+    const batchConcurrency = Math.min(SETTINGS.itemConcurrency, global.concurrency);
+    const pipeline = (pipelineLogger: Logger, concurrency: number): SlidesToPdf =>
       new SlidesToPdf({
         messages,
         logger: pipelineLogger,
@@ -132,11 +136,12 @@ export class ServiceFactory {
         downloader: new SlideDownloader({
           session,
           logger: pipelineLogger,
-          delay: new TimerDelay(),
+          delay: new TimerDelay(signal),
           messages,
           settings: {
-            concurrency: global.concurrency,
+            concurrency,
             maxImageBytes: SETTINGS.maxImageBytes,
+            maxDeckBytes: SETTINGS.maxDeckBytes,
             retries: SETTINGS.retries,
             backoffMs: SETTINGS.backoffMs,
           },
@@ -148,7 +153,7 @@ export class ServiceFactory {
           messages,
         }),
       });
-    const sink = new NodeFileSink({ messages });
+    const sink = new NodeFileSink({ messages, signal });
     const namer = new FileNamer({ fallbackName: messages.common.defaultFileName(), maxNameBytes: SETTINGS.maxNameBytes });
 
     return {
@@ -158,12 +163,19 @@ export class ServiceFactory {
       resolver: new CourseResolver({ catalog, messages }),
       namer,
       batch: new BatchDownloader({
-        // Dentro de un lote el progreso de cada SCORM sería ruido: solo pasan sus avisos.
-        items: new ItemDownloader({ platform, slides: pipeline(new QuietLogger({ inner: logger })), namer, sink, tracer }),
+        // The batch reports progress by material. Nested converters only forward warnings.
+        items: new ItemDownloader({
+          platform,
+          slides: pipeline(new QuietLogger({ inner: logger }), Math.floor(global.concurrency / batchConcurrency)),
+          namer,
+          sink,
+          tracer,
+        }),
         planner: new NamePlanner({ namer }),
         logger,
         tracer,
-        settings: { concurrency: Math.min(SETTINGS.itemConcurrency, global.concurrency) },
+        settings: { concurrency: batchConcurrency },
+        signal,
       }),
       printer: new ReportPrinter({ logger, messages }),
       convert: new ConvertScormToPdf({
@@ -172,9 +184,9 @@ export class ServiceFactory {
           logger,
           messages,
           maxRevision: SETTINGS.maxRevision,
-          probeBatchSize: SETTINGS.probeBatchSize,
+          probeBatchSize: Math.min(SETTINGS.probeBatchSize, global.concurrency),
         }),
-        slides: pipeline(logger),
+        slides: pipeline(logger, global.concurrency),
         namer: new OutputNamer({ maxStemLength: SETTINGS.maxFileNameStem }),
         sink,
         logger,

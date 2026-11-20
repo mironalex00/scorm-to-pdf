@@ -27,7 +27,7 @@ export function statusResponse(status: number): HttpResponse {
 
 type Handler = (request: HttpRequest) => HttpResponse | Promise<HttpResponse>;
 
-/** Cliente HTTP en memoria: responde según una tabla de rutas y registra cada petición. */
+/** Serves registered responses and records each request. */
 export class FakeHttpClient implements HttpClient {
   readonly requests: HttpRequest[] = [];
   private readonly routes = new Map<string, Handler>();
@@ -40,7 +40,7 @@ export class FakeHttpClient implements HttpClient {
   async get(request: HttpRequest): Promise<HttpResponse> {
     this.requests.push(request);
     const handler = this.routes.get(request.url.href);
-    if (!handler) throw new Error(`FakeHttpClient: ruta no registrada ${request.url.href}`);
+    if (!handler) throw new Error(`FakeHttpClient has no route for ${request.url.href}`);
     return handler(request);
   }
 
@@ -55,6 +55,11 @@ export class MemoryFileSink implements FileSink {
   async write(path: string, content: Uint8Array): Promise<string> {
     this.files.set(path, content);
     return path;
+  }
+
+  async writeIfAbsent(path: string, content: Uint8Array): Promise<string | undefined> {
+    if (this.files.has(path)) return undefined;
+    return this.write(path, content);
   }
 
   async exists(path: string): Promise<boolean> {

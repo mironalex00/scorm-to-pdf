@@ -1,5 +1,6 @@
 import type { Logger, ProgressUpdate } from "../application/ports.ts";
 import type { Messages } from "../i18n/Messages.ts";
+import { plainLine, plainOutput } from "./plainText.ts";
 
 export interface OutputStream {
   write(text: string): unknown;
@@ -11,10 +12,7 @@ export interface OutputStream {
 const CLEAR_LINE = "\r\x1b[2K";
 const MIN_LABEL_WIDTH = 10;
 
-/**
- * Salida para personas. En una terminal el progreso se redibuja en una sola línea;
- * en una tubería o archivo se imprime una línea por diapositiva.
- */
+/** Redraws progress in place on a terminal and prints separate progress lines in a pipe. */
 export class ConsoleLogger implements Logger {
   private readonly stdout: OutputStream;
   private readonly stderr: OutputStream;
@@ -33,31 +31,32 @@ export class ConsoleLogger implements Logger {
 
   info(message: string): void {
     if (this.quiet) return;
-    this.stdout.write(`${this.takeLine()}${message}\n`);
+    this.stdout.write(`${this.takeLine()}${plainLine(message)}\n`);
   }
 
   result(message: string): void {
-    this.stdout.write(`${this.takeLine()}${message}\n`);
+    this.stdout.write(`${this.takeLine()}${plainOutput(message)}\n`);
   }
 
   warn(message: string): void {
-    this.stderr.write(`${this.takeLine()}${this.messages.logger.warningPrefix()} ${message}\n`);
+    this.stderr.write(`${this.takeLine()}${this.messages.logger.warningPrefix()} ${plainLine(message)}\n`);
   }
 
   progress(update: ProgressUpdate): void {
     if (this.quiet) return;
     const counter = `[${String(update.done).padStart(String(update.total).length)}/${update.total}]`;
+    const label = plainLine(update.label);
 
     if (!this.interactive) {
-      this.stdout.write(`${counter} ${update.label}\n`);
+      this.stdout.write(`${counter} ${label}\n`);
       return;
     }
     const finished = update.done === update.total;
-    this.stdout.write(`${CLEAR_LINE}${counter} ${this.fit(update.label, counter.length + 1)}${finished ? "\n" : ""}`);
+    this.stdout.write(`${CLEAR_LINE}${counter} ${this.fit(label, counter.length + 1)}${finished ? "\n" : ""}`);
     this.progressLineOpen = !finished;
   }
 
-  /** Si hay una línea de progreso abierta, la borra para que el mensaje no se mezcle con ella. */
+  /** Clears the progress line before printing a message. */
   private takeLine(): string {
     if (!this.progressLineOpen) return "";
     this.progressLineOpen = false;

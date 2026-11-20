@@ -2,6 +2,7 @@ import type { CatalogService } from "../application/CatalogService.ts";
 import type { CourseResolver } from "../application/CourseResolver.ts";
 import type { Logger } from "../application/ports.ts";
 import type { Messages } from "../i18n/Messages.ts";
+import { jsonOutput } from "../infra/plainText.ts";
 import type { Command } from "./Command.ts";
 
 export class ItemsCommand implements Command {
@@ -31,13 +32,10 @@ export class ItemsCommand implements Command {
   async run(): Promise<number> {
     const course = await this.resolver.resolve(this.query);
     const contents = await this.catalog.contents(course);
-    const weeks = this.catalog.sectionsOf(contents).map((section) => ({
-      ...section,
-      items: this.catalog.itemsIn(contents, section.number),
-    }));
+    const weeks = this.catalog.weeks(contents).map(({ section, items }) => ({ ...section, items }));
 
     if (this.json) {
-      this.logger.result(JSON.stringify({ course, weeks }, null, 2));
+      this.logger.result(jsonOutput({ course, weeks }));
       return 0;
     }
     const { commands } = this.messages;

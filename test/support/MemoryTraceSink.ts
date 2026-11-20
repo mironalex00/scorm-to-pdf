@@ -17,6 +17,6 @@ export class MemoryTraceSink implements TraceSink {
     return "memoria";
   }
   private guard(): void {
-    if (this.failing) throw new Error("disco lleno");
+    if (this.failing) throw new Error("disk full");
   }
 }

@@ -5,7 +5,7 @@ import type { ItemOutcome } from "../../src/application/ItemDownloader.ts";
 import { ReportPrinter } from "../../src/application/ReportPrinter.ts";
 import { AuthenticationError, DownloadError } from "../../src/domain/errors.ts";
 import type { CourseItem } from "../../src/domain/catalog.ts";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import { MemoryLogger } from "../support/fakes.ts";
 
 const item = (name: string): CourseItem => ({ id: name, kind: "resource", name, url: "u", sectionNumber: 1 });
@@ -17,37 +17,37 @@ function report(outcomes: ItemOutcome[], aborted = false): BatchReport {
 
 function print(batch: BatchReport) {
   const logger = new MemoryLogger();
-  const code = new ReportPrinter({ logger, messages: es }).print(batch);
+  const code = new ReportPrinter({ logger, messages: en }).print(batch);
   return { code, logger };
 }
 
 describe("ReportPrinter", () => {
-  it("imprime las rutas descargadas como resultado, avisa de lo omitido y resume; código 0", () => {
+  it("prints output paths and a summary, and returns exit code 0", () => {
     const { code, logger } = print(report([
       { item: item("a"), status: "downloaded", path: "out/1/a.pdf", bytes: 1 },
       { item: item("b"), status: "skipped", path: "out/1/b.pdf" },
     ]));
     assert.equal(code, 0);
     assert.deepEqual(logger.results, ["out/1/a.pdf"]);
-    assert.deepEqual(logger.infos, ["Omitido (ya existe): out/1/b.pdf", "Descargados: 1 · Omitidos: 1 · Fallidos: 0"]);
+    assert.deepEqual(logger.infos, ["Skipped (already exists): out/1/b.pdf", "Downloaded: 1 | Skipped: 1 | Failed: 0"]);
     assert.deepEqual(logger.warnings, []);
   });
 
-  it("un fallo normal se avisa con su detalle y da código 1", () => {
-    const { code, logger } = print(report([{ item: item("c"), status: "failed", error: new DownloadError("sin red"), authentication: false }]));
+  it("reports a download failure and returns exit code 1", () => {
+    const { code, logger } = print(report([{ item: item("c"), status: "failed", error: new DownloadError("no network"), authentication: false }]));
     assert.equal(code, 1);
-    assert.deepEqual(logger.warnings, ["Fallo en «c»: sin red"]);
+    assert.deepEqual(logger.warnings, ['Failed to download "c": no network']);
   });
 
-  it("un fallo de sesión da código 3 y el lote abortado lo comunica", () => {
+  it("reports a batch stopped by an expired session and returns exit code 3", () => {
     const { code, logger } = print(
       report([{ item: item("d"), status: "failed", error: new AuthenticationError("sesión"), authentication: true }], true),
     );
     assert.equal(code, 3);
-    assert.match(logger.warnings.join("\n"), /La sesión caducó/);
+    assert.match(logger.warnings.join("\n"), /The Moodle session expired/);
   });
 
-  it("un lote vacío es un éxito", () => {
+  it("returns success for an empty batch", () => {
     assert.equal(print(report([])).code, 0);
   });
 });

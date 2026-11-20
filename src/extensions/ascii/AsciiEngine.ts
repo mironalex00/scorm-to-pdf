@@ -56,7 +56,7 @@ function escapeHTML(char: string): string {
   return char.replace(/[&<>]/g, (symbol) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[symbol]!);
 }
 
-/** Ajusta la forma y el tono de cada celda RGB a los 95 glifos ASCII imprimibles. */
+/** Matches the shape and brightness of each RGB cell to a printable ASCII glyph. */
 export class AsciiEngine {
   private readonly glyphs: readonly Glyph[];
   private readonly flat: number;
@@ -67,12 +67,12 @@ export class AsciiEngine {
   constructor(options: AsciiOptions = {}) {
     const { chars = "", bg = false, color = false, invert = false, gamma = 1, tone = 1 } = options;
     if (!Number.isFinite(gamma) || gamma <= 0 || !Number.isFinite(tone) || tone < 0) {
-      throw new Error("Gamma debe ser positiva y el peso del tono debe ser no negativo.");
+      throw new Error("Gamma must be positive and tone weight cannot be negative.");
     }
     this.options = { chars, bg, color, invert, gamma, tone };
     const alphabet = chars ? [...new Set([...chars].filter((char) => PRINTABLE_ASCII.test(char)))]
       : Array.from({ length: 95 }, (_, index) => String.fromCharCode(index + 32));
-    if (alphabet.length === 0) throw new Error("--chars no contiene caracteres ASCII imprimibles.");
+    if (alphabet.length === 0) throw new Error("--chars must contain printable ASCII characters.");
     const masks = alphabet.map(glyphMask);
     const dots = masks.map((mask) => Uint8Array.from([...mask.keys()].filter((index) => mask[index] === 1)));
     const maxDots = Math.max(1, ...dots.map((indices) => indices.length));
@@ -89,16 +89,16 @@ export class AsciiEngine {
 
   size(srcW: number, srcH: number, cols: number, aspect: number) {
     if (![srcW, srcH, cols].every((value) => Number.isSafeInteger(value) && value > 0) ||
-        !Number.isFinite(aspect) || aspect <= 0) throw new Error("Dimensiones o proporción inválidas.");
+        !Number.isFinite(aspect) || aspect <= 0) throw new Error("Invalid dimensions or aspect ratio.");
     const rows = Math.max(1, Math.round(cols * aspect * srcH / srcW));
-    if (cols > 500 || rows > 500 || cols * rows > 75_000) throw new Error("La rejilla ASCII es demasiado grande.");
+    if (cols > 500 || rows > 500 || cols * rows > 75_000) throw new Error("The ASCII grid is too large.");
     return { cols, rows, w: cols * CELL_WIDTH, h: rows * CELL_HEIGHT };
   }
 
   frame(rgb: Uint8Array, cols: number, rows: number): AsciiGrid {
     const cells = cols * rows;
     if (!Number.isSafeInteger(cols) || !Number.isSafeInteger(rows) || cols <= 0 || rows <= 0 ||
-        cells * PIXELS * 3 !== rgb.length) throw new Error("El cuadro RGB24 no coincide con la rejilla.");
+        cells * PIXELS * 3 !== rgb.length) throw new Error("The RGB24 frame does not match the grid dimensions.");
     const gi = new Uint8Array(cells);
     const fg = new Uint8Array(cells * 3);
     const bg = new Uint8Array(cells * 3);
@@ -128,15 +128,15 @@ export class AsciiEngine {
           }
         }
 
-        const max = Math.max(red, green, blue) || 1;
-        const tint = !useBg && color ? [red * 255 / max, green * 255 / max, blue * 255 / max] : [255, 255, 255];
+        const max = Math.max(red, green, blue);
+        const tint = !useBg && color && max > 0 ? [red * 255 / max, green * 255 / max, blue * 255 / max] : [255, 255, 255];
         const inkLum = (tint[0]! * 77 + tint[1]! * 150 + tint[2]! * 29) / 256;
         const index = cy * cols + cx;
         const best = this.match(luminance, total, inkLum, tone, useBg);
         gi[index] = best;
 
         if (!useBg) {
-          fg.set(tint.map(Math.round), index * 3);
+          fg.set(tint.map((value) => Math.round(this.options.invert ? 255 - value : value)), index * 3);
           continue;
         }
         const on = this.glyphs[best]!.on;
@@ -169,7 +169,7 @@ export class AsciiEngine {
       const n = glyph.on.length;
       const off = PIXELS - n;
       const contrast = n === 0 ? 0 : onSum / n - (total - onSum) / off;
-      // Con fondo de color es válido que la tinta sea más oscura que el fondo.
+      // A colored background can be brighter than its foreground.
       const shape = useBg ? contrast : Math.max(0, contrast);
       const error = mean - inkLum * glyph.density;
       const score = shape * shape * n * off / PIXELS - (useBg ? 0 : tone * PIXELS * error * error);
@@ -188,6 +188,7 @@ export class AsciiEngine {
   ansi(grid: AsciiGrid): string {
     if (!this.colored) return this.text(grid);
     const { cols, fg, bg } = grid;
+    const lightPaper = this.options.invert && !this.options.bg;
     let previousFg = -1;
     let previousBg = -1;
     return this.lines(grid, (index, x) => {
@@ -197,9 +198,9 @@ export class AsciiEngine {
       const fgKey = packedColor(fg, offset);
       const bgKey = this.options.bg ? packedColor(bg, offset) : -1;
       let prefix = "";
-      if ((this.options.bg || char !== " ") && (fgKey !== previousFg || bgKey !== previousBg)) {
+      if ((this.options.bg || lightPaper || char !== " ") && (fgKey !== previousFg || bgKey !== previousBg)) {
         const foreground = [fg[offset], fg[offset + 1], fg[offset + 2]].join(";");
-        const background = this.options.bg ? ";48;2;" + [bg[offset], bg[offset + 1], bg[offset + 2]].join(";") : "";
+        const background = this.options.bg ? ";48;2;" + [bg[offset], bg[offset + 1], bg[offset + 2]].join(";") : lightPaper ? ";48;2;255;255;255" : "";
         prefix = "\x1b[38;2;" + foreground + background + "m";
         previousFg = fgKey;
         previousBg = bgKey;
@@ -232,15 +233,15 @@ export class AsciiEngine {
 
   html(grids: readonly AsciiGrid[], fps = 12): string {
     const grid = grids[0];
-    if (!grid) throw new Error("HTML necesita al menos un cuadro.");
+    if (!grid) throw new Error("HTML output requires at least one frame.");
     return this.htmlDocument(grids.map((frame) => this.htmlFrame(frame)), grid.cols, fps);
   }
 
   htmlDocument(frames: readonly string[], cols: number, fps: number): string {
     if (frames.length === 0 || !Number.isInteger(cols) || cols < 1 || !Number.isFinite(fps) || fps <= 0) {
-      throw new Error("HTML necesita cuadros, columnas y una frecuencia positiva.");
+      throw new Error("HTML output requires frames, columns, and a positive frame rate.");
     }
-    const light = !this.colored && this.options.invert;
+    const light = !this.options.bg && this.options.invert;
     const css = "body{margin:0;min-height:100vh;display:grid;place-items:center;background:" + (light ? "#fff" : "#000") +
       "}pre{margin:0;white-space:pre;font:calc(100vw/" + cols + "/.6)/1.2 monospace;color:" + (light ? "#000" : "#fff") + "}";
     const body = "<pre id=\"art\">" + frames[0] + "</pre>";
@@ -252,11 +253,11 @@ export class AsciiEngine {
   }
 
   raster(grid: AsciiGrid, scale = 2): RasterFrame {
-    if (!Number.isSafeInteger(scale) || scale < 1 || scale > 8) throw new Error("La escala debe ser un entero entre 1 y 8.");
+    if (!Number.isSafeInteger(scale) || scale < 1 || scale > 8) throw new Error("Scale must be an integer from 1 to 8.");
     const { cols, rows, gi, fg, bg } = grid;
     const w = cols * CELL_WIDTH * scale;
     const h = rows * CELL_HEIGHT * scale;
-    if (w * h > 32_000_000) throw new Error("La imagen ASCII de salida es demasiado grande.");
+    if (w * h > 32_000_000) throw new Error("The ASCII output image is too large.");
     const buf = Buffer.alloc(w * h * 3);
     const ink = this.options.invert ? 0 : 255;
     const paper = 255 - ink;
@@ -274,7 +275,7 @@ export class AsciiEngine {
               for (let channel = 0; channel < 3; channel++) {
                 const colorIndex = index * 3 + channel;
                 buf[offset++] = this.colored
-                  ? (on ? fg[colorIndex]! : this.options.bg ? bg[colorIndex]! : 0)
+                  ? (on ? fg[colorIndex]! : this.options.bg ? bg[colorIndex]! : paper)
                   : (on ? ink : paper);
               }
             }

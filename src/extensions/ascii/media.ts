@@ -7,6 +7,8 @@ const PROBE_TIMEOUT_MS = 20_000;
 const MAX_PROBE_BYTES = 128 * 1024;
 const LOCAL_PROTOCOLS = "file,pipe";
 const REMOTE_PROTOCOLS = "http,https,tcp,tls";
+const MEDIA_FORMATS = "image2,jpeg_pipe,mjpeg,png_pipe,webp_pipe,gif,mov,mp4,matroska,webm,avi";
+const NETWORK_ENV = ["http_proxy", "https_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "SSL_CERT_FILE", "SSL_CERT_DIR"];
 
 export interface MediaInfo {
   readonly width: number;
@@ -34,14 +36,15 @@ interface Process {
 
 export function mediaInput(input: string, cwd = process.cwd()): string {
   if (/^https?:\/\//i.test(input)) return input;
-  if (input.trim() === "") throw new Error("Falta el archivo de entrada.");
+  if (input.trim() === "") throw new Error("Specify an input file.");
   return resolve(cwd, input);
 }
 
 function inputOptions(input: string): string[] {
-  return /^https?:\/\//i.test(input)
+  const protocols = /^https?:\/\//i.test(input)
     ? ["-protocol_whitelist", REMOTE_PROTOCOLS, "-rw_timeout", "20000000"]
     : ["-protocol_whitelist", LOCAL_PROTOCOLS];
+  return [...protocols, "-format_whitelist", MEDIA_FORMATS];
 }
 
 function rate(value: string | undefined): number {
@@ -52,7 +55,7 @@ function rate(value: string | undefined): number {
 
 function toolError(name: "ffmpeg" | "ffprobe", error: unknown): Error {
   if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-    return new Error("No se pudo ejecutar " + name + " desde la carpeta temporal.", { cause: error });
+    return new Error("Could not launch " + name + " from the temporary directory.", { cause: error });
   }
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -62,7 +65,9 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
   const timeout = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   const stopProbe = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const process = spawnTool(tools, "ffprobe", [
-    "-v", "error", ...inputOptions(input), "-show_streams", "-show_format", "-of", "json", "-i", input,
+    "-v", "error", ...inputOptions(input), "-show_entries",
+    "format=format_name:stream=codec_type,width,height,avg_frame_rate,r_frame_rate:stream_tags=rotate:stream_side_data=rotation",
+    "-of", "json", "-i", input,
   ], stopProbe, input);
   process.child.stdin.end();
   const chunks: Buffer[] = [];
@@ -71,7 +76,7 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
     for await (const chunk of process.child.stdout.iterator({ destroyOnReturn: false })) {
       const bytes = chunk as Buffer;
       total += bytes.length;
-      if (total > MAX_PROBE_BYTES) throw new Error("La entrada contiene demasiados metadatos.");
+      if (total > MAX_PROBE_BYTES) throw new Error("The input contains too much metadata.");
       chunks.push(bytes);
     }
     stopProbe.throwIfAborted();
@@ -89,7 +94,7 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
   const height = video?.height;
   if (!video || !width || !height || !Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
       width < 1 || height < 1 || width * height > 50_000_000) {
-    throw new Error("La entrada no contiene una imagen o un vídeo con dimensiones válidas.");
+    throw new Error("No image or video with valid dimensions was found in the input.");
   }
   const rotation = Number(video.side_data_list?.find((entry) => entry.rotation !== undefined)?.rotation ?? video.tags?.rotate ?? 0);
   const sideways = Math.abs(rotation) % 180 === 90;
@@ -105,8 +110,12 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
 }
 
 function spawnTool(tools: MediaTools, name: keyof MediaTools, args: string[], signal?: AbortSignal, input?: string): Process {
-  const child = spawn(tools[name], args, { signal, killSignal: "SIGKILL" });
-  // Las escrituras del codificador notifican también el error en su callback.
+  const env: NodeJS.ProcessEnv = {};
+  if (input && /^https?:\/\//i.test(input)) {
+    for (const key of NETWORK_ENV) env[key] = process.env[key];
+  }
+  const child = spawn(tools[name], args, { env, signal, killSignal: "SIGKILL" });
+  // The encoder receives write errors through the callback.
   child.stdin.on("error", () => {});
   let stderr = "";
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
@@ -114,8 +123,8 @@ function spawnTool(tools: MediaTools, name: keyof MediaTools, args: string[], si
     let failure: Error | undefined;
     child.on("error", (error) => { failure = toolError(name, error); });
     child.once("close", (code, stopSignal) => {
-      const detail = input ? stderr.trim().replaceAll(input, "[entrada]") : stderr.trim();
-      resolveDone(failure ?? (code === 0 ? undefined : new Error(detail || name + " terminó con " + (stopSignal ?? code) + ".")));
+      const detail = input ? stderr.trim().replaceAll(input, "[input]") : stderr.trim();
+      resolveDone(failure ?? (code === 0 ? undefined : new Error(detail || name + " exited with " + (stopSignal ?? code) + ".")));
     });
   });
   return { child, done };
@@ -175,7 +184,7 @@ export async function* decodeFrames(
     const failure = await process.done;
     if (failure) throw failure;
     signal?.throwIfAborted();
-    if (filled !== 0) throw new Error("FFmpeg entregó un cuadro incompleto.");
+    if (filled !== 0) throw new Error("FFmpeg returned an incomplete frame.");
   } finally {
     await stop(process);
   }
@@ -185,7 +194,7 @@ export type RasterFormat = "png" | "gif" | "mp4" | "webm" | "mov" | "mkv" | "avi
 
 const CODECS: Record<RasterFormat, readonly string[]> = {
   png: ["-frames:v", "1", "-c:v", "png", "-f", "image2"],
-  gif: ["-vf", "split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=none", "-loop", "0"],
+  gif: ["-vf", "split[a][b];[a]palettegen=stats_mode=single[p];[b][p]paletteuse=new=1:dither=none", "-loop", "0"],
   mp4: ["-c:v", "libx264", "-crf", "15", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart"],
   webm: ["-c:v", "libvpx-vp9", "-crf", "18", "-b:v", "0", "-pix_fmt", "yuv420p", "-c:a", "libopus"],
   mov: ["-c:v", "libx264", "-crf", "15", "-pix_fmt", "yuv420p", "-c:a", "aac"],
@@ -203,7 +212,7 @@ export async function encodeFrames(
   signal?.throwIfAborted();
   const args = ["-y", "-filter_complex_threads", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", width + "x" + height,
     "-framerate", String(fps), "-i", "pipe:0"];
-  // El vídeo marca la duración aunque su pista de audio termine antes.
+  // Pad short audio so the video determines the output duration.
   if (audio) args.push(...inputOptions(audio), "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-af", "apad", "-shortest");
   args.push(...CODECS[format], "-threads", "1", output);
   const process = ffmpeg(tools, args, signal, audio);

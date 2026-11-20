@@ -1,51 +1,48 @@
-# Motor ASCII
+# ASCII conversion
 
-La orden ASCII de scorm-to-pdf convierte JPG/JPEG, PNG, WebP estático, GIF animado, MP4 y WebM. Ajusta la forma y el tono de cada celda con los 95 glifos imprimibles. Admite color ANSI truecolor de primer plano y fondo.
+Convert JPEG, PNG, static WebP, animated GIF, MP4, and WebM into ASCII. The engine matches the shape and brightness of each cell to a printable glyph. Terminal and raster output can use foreground and background colors.
 
-## Uso
+## Usage
 
 ~~~sh
-npm ci
 node src/main.ts ascii --help
 node src/main.ts ascii src/extensions/ascii/content/bear_hoop.png --invert -w 48
 node src/main.ts ascii src/extensions/ascii/content/wink_cat.gif --loop --color --fps 12
 node src/main.ts ascii video.mp4 -o video-ascii.webm --bg --cols 100
 ~~~
 
-También puedes usar Bun y bun install. ASCII admite archivos y URLs HTTP(S) sin una sesión Moodle. Sin destino, las animaciones se reproducen en la terminal y Ctrl+C restaura la pantalla. Con stdout redirigido se escribe el primer cuadro. La ruta anterior src/extensions/ascii/main.ts llama al mismo CLI con la orden ascii.
+Inputs can be local files or HTTP(S) URLs. ASCII conversion uses no Moodle session. Without an output path, animations play in a terminal and Ctrl+C restores the screen. If stdout is redirected, the converter writes the first frame. The older entry point at `src/extensions/ascii/main.ts` forwards to the same command.
 
-| Salida | Comportamiento |
+| Output | Contents |
 | --- | --- |
-| .txt, .ansi, .png | Exporta el primer cuadro. |
-| .json, .html | Exporta la animación con su frecuencia de cuadros. El valor por defecto de --max-frames es 600. |
-| .gif, .mp4, .webm, .mov, .mkv, .avi | Rasteriza los glifos. El vídeo conserva la primera pista de audio si existe, salvo con --mute. |
+| `.txt`, `.ansi`, `.png` | First frame. |
+| `.json`, `.html` | Animation and frame rate. The default frame limit is 600. |
+| `.gif`, `.mp4`, `.webm`, `.mov`, `.mkv`, `.avi` | Rasterized frames. Video includes the first source audio track when available unless `--mute` is set. |
 
-## Preparación y compilación
+## Codec setup
 
-El conversor usa los [archivos de FFmpeg y FFprobe 9.0.2 de Martin Riedl](https://ffmpeg.martin-riedl.de/) para macOS y Linux, x64 y arm64. La primera conversión obtiene los dos ZIP de la versión fijada y comprueba su SHA-256. Se guardan comprimidos en .ascii-cache dentro del directorio actual. SCORM_ASCII_CACHE permite usar una carpeta común desde distintos directorios.
+The converter uses pinned [FFmpeg and FFprobe 9.0.2 builds from Martin Riedl](https://ffmpeg.martin-riedl.de/) for macOS and Linux on x64 and arm64. On first use it downloads the two ZIP archives and checks their SHA-256 digests. The verified archives stay in `.ascii-cache` in the current directory. Set `SCORM_ASCII_CACHE` to share a cache across working directories.
 
-Cada operación extrae el par verificado en un directorio temporal privado y emplea rutas absolutas. Se elimina al terminar, al fallar y tras SIGHUP, SIGINT o SIGTERM. Una terminación forzosa del sistema puede dejar residuos en el directorio temporal. Las siguientes conversiones locales usan el par comprimido en caché.
+A conversion extracts the tools into a private temporary directory, invokes them by absolute path, and removes them before returning. Network inputs run with only the proxy and certificate settings they may need. A forced kill or an OS failure can leave temporary files.
 
-Puedes preparar los ZIP antes de compilar o ejecutar sin conexión:
+Prepare the cache before going offline or building a standalone executable.
 
 ~~~sh
 npm run ascii:prepare
-bun build --compile src/main.ts --outfile dist/scorm-to-pdf
+npm run build
 ~~~
 
-El programa compilado incluye el descompresor y los cuadros de la TUI. Puede preparar su propia caché con ascii --prepare o usar una preparada mediante SCORM_ASCII_CACHE.
+The standalone executable includes the ZIP reader and the interactive farewell and error animations. It can prepare a cache with `ascii --prepare` or use a populated `SCORM_ASCII_CACHE`.
 
-## Cuadros para la TUI y TypeScript
-
-La despedida, el error de descarga y el error general reproducen los cuadros ASCII generados a partir de bear_hoop.png, hammer_point.png y startled_boy.png, respectivamente. El generador usa los mismos glifos que la orden ascii y aplica movimientos limitados al aro, al martillo o a los brazos. Los cuadros se incluyen con la TUI y se regeneran con npm run ascii:art.
+## TypeScript API
 
 ~~~ts
-import { renderAsciiClip, fitAsciiFrame } from "./src/extensions/ascii/index.ts";
+import { fitAsciiFrame, renderAsciiClip } from "./src/extensions/ascii/index.ts";
 
 const clip = await renderAsciiClip("wink_cat.gif", { cols: 40, fps: 12 });
 const firstFrame = fitAsciiFrame(clip.frames[0]!, 79, 20);
 ~~~
 
-La salida JSON usa cols, rows, fps y frames. Cada cuadro de frames contiene líneas ASCII sin secuencias de control. AsciiEngine admite cuadros RGB24 en memoria. openAsciiMedia permite leer cuadros con un iterador asíncrono y liberar su directorio temporal al cerrar el iterador.
+A clip has `cols`, `rows`, `fps`, and `frames`. Each frame contains plain ASCII lines. `AsciiEngine` also accepts RGB24 frames in memory. Use `openAsciiMedia` to iterate through frames and close the iterator when stopping early.
 
-Las pruebas multimedia usan los ZIP preparados. Después de npm run ascii:prepare, SCORM_ASCII_TEST=1 npm test exige ejecutarlas y detecta un paquete ausente.
+Run `npm run ascii:art` to regenerate the interactive animations from the bear, hammer, and startled boy images in [content](content). For codec integration tests, run `npm run ascii:prepare` followed by `SCORM_ASCII_TEST=1 npm test`.
