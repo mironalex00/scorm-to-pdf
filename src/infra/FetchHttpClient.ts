@@ -17,12 +17,14 @@ export class FetchHttpClient implements HttpClient {
 
   async get(request: HttpRequest): Promise<HttpResponse> {
     try {
+      const timeout = AbortSignal.timeout(this.timeoutMs);
+      const signal = request.signal ? AbortSignal.any([request.signal, timeout]) : timeout;
       const response = await fetch(request.url, {
         method: request.method ?? "GET",
         headers: request.headers,
         body: request.body,
         redirect: "manual",
-        signal: AbortSignal.timeout(this.timeoutMs),
+        signal,
       });
       const body = await this.readBody(response, request);
       return {
@@ -33,6 +35,7 @@ export class FetchHttpClient implements HttpClient {
         body,
       };
     } catch (error) {
+      request.signal?.throwIfAborted();
       if (error instanceof DownloadError) throw error;
       const reason = error as Error;
       throw new DownloadError(

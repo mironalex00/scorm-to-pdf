@@ -1,10 +1,10 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
-import { promisify } from "node:util";
+import type { MediaTools } from "./runtime.ts";
 
-const exec = promisify(execFile);
 const PROBE_TIMEOUT_MS = 20_000;
+const MAX_PROBE_BYTES = 128 * 1024;
 const LOCAL_PROTOCOLS = "file,pipe";
 const REMOTE_PROTOCOLS = "http,https,tcp,tls";
 
@@ -32,14 +32,16 @@ interface Process {
   readonly done: Promise<Error | undefined>;
 }
 
-export function mediaInput(input: string): string {
+export function mediaInput(input: string, cwd = process.cwd()): string {
   if (/^https?:\/\//i.test(input)) return input;
   if (input.trim() === "") throw new Error("Falta el archivo de entrada.");
-  return resolve(input);
+  return resolve(cwd, input);
 }
 
 function inputOptions(input: string): string[] {
-  return ["-protocol_whitelist", /^https?:\/\//i.test(input) ? REMOTE_PROTOCOLS : LOCAL_PROTOCOLS];
+  return /^https?:\/\//i.test(input)
+    ? ["-protocol_whitelist", REMOTE_PROTOCOLS, "-rw_timeout", "20000000"]
+    : ["-protocol_whitelist", LOCAL_PROTOCOLS];
 }
 
 function rate(value: string | undefined): number {
@@ -50,24 +52,37 @@ function rate(value: string | undefined): number {
 
 function toolError(name: "ffmpeg" | "ffprobe", error: unknown): Error {
   if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-    return new Error("No se encuentra " + name + ". Instala FFmpeg o indica la ruta mediante " + name.toUpperCase() + ".", { cause: error });
+    return new Error("No se pudo ejecutar " + name + " desde la carpeta temporal.", { cause: error });
   }
   return error instanceof Error ? error : new Error(String(error));
 }
 
-export async function probe(input: string, signal?: AbortSignal): Promise<MediaInfo> {
-  const bin = process.env.FFPROBE || "ffprobe";
-  let stdout: string;
+export async function probe(tools: MediaTools, input: string, signal?: AbortSignal): Promise<MediaInfo> {
+  signal?.throwIfAborted();
+  const timeout = AbortSignal.timeout(PROBE_TIMEOUT_MS);
+  const stopProbe = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const process = spawnTool(tools, "ffprobe", [
+    "-v", "error", ...inputOptions(input), "-show_streams", "-show_format", "-of", "json", "-i", input,
+  ], stopProbe, input);
+  process.child.stdin.end();
+  const chunks: Buffer[] = [];
+  let total = 0;
   try {
-    ({ stdout } = await exec(bin, [
-      "-v", "error", ...inputOptions(input), "-show_streams", "-show_format", "-of", "json", "-i", input,
-    ], { encoding: "utf8", maxBuffer: 128 * 1024, timeout: PROBE_TIMEOUT_MS, signal }));
-  } catch (error) {
-    const failure = toolError("ffprobe", error);
-    const stderr = (failure as Error & { stderr?: string }).stderr?.trim();
-    throw stderr ? new Error(stderr.replaceAll(input, "[entrada]"), { cause: failure }) : failure;
+    for await (const chunk of process.child.stdout.iterator({ destroyOnReturn: false })) {
+      const bytes = chunk as Buffer;
+      total += bytes.length;
+      if (total > MAX_PROBE_BYTES) throw new Error("La entrada contiene demasiados metadatos.");
+      chunks.push(bytes);
+    }
+    stopProbe.throwIfAborted();
+    const failure = await process.done;
+    if (failure) throw failure;
+  } finally {
+    await stop(process);
   }
-  const metadata = JSON.parse(stdout) as { streams?: StreamInfo[]; format?: { format_name?: string } };
+  const metadata = JSON.parse(Buffer.concat(chunks, total).toString("utf8")) as {
+    streams?: StreamInfo[]; format?: { format_name?: string };
+  };
   const streams = metadata.streams ?? [];
   const video = streams.find(({ codec_type }) => codec_type === "video");
   const width = video?.width;
@@ -89,27 +104,35 @@ export async function probe(input: string, signal?: AbortSignal): Promise<MediaI
   };
 }
 
-function ffmpeg(args: string[], signal?: AbortSignal): Process {
-  const child = spawn(process.env.FFMPEG || "ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], { signal });
+function spawnTool(tools: MediaTools, name: keyof MediaTools, args: string[], signal?: AbortSignal, input?: string): Process {
+  const child = spawn(tools[name], args, { signal, killSignal: "SIGKILL" });
+  // Las escrituras del codificador notifican también el error en su callback.
+  child.stdin.on("error", () => {});
   let stderr = "";
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
   const done = new Promise<Error | undefined>((resolveDone) => {
     let failure: Error | undefined;
-    child.on("error", (error) => { failure = toolError("ffmpeg", error); });
+    child.on("error", (error) => { failure = toolError(name, error); });
     child.once("close", (code, stopSignal) => {
-      resolveDone(failure ?? (code === 0 ? undefined : new Error(stderr.trim() || "FFmpeg terminó con " + (stopSignal ?? code) + ".")));
+      const detail = input ? stderr.trim().replaceAll(input, "[entrada]") : stderr.trim();
+      resolveDone(failure ?? (code === 0 ? undefined : new Error(detail || name + " terminó con " + (stopSignal ?? code) + ".")));
     });
   });
   return { child, done };
 }
 
+function ffmpeg(tools: MediaTools, args: string[], signal?: AbortSignal, input?: string): Process {
+  return spawnTool(tools, "ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], signal, input);
+}
+
 async function stop(process: Process): Promise<void> {
   process.child.stdout.resume();
-  if (process.child.exitCode === null && process.child.signalCode === null) process.child.kill();
+  if (process.child.exitCode === null && process.child.signalCode === null) process.child.kill("SIGKILL");
   await process.done;
 }
 
 export async function* decodeFrames(
+  tools: MediaTools,
   input: string,
   options: { width: number; height: number; fps: number; still: boolean; gif: boolean; matte: number; downscale: boolean; signal?: AbortSignal },
 ): AsyncGenerator<Buffer> {
@@ -120,11 +143,11 @@ export async function* decodeFrames(
     "scale=" + width + ":" + height + ":flags=" + (options.downscale ? "area" : "lanczos"),
     "format=rgba",
   ];
-  const process = ffmpeg([
+  const process = ffmpeg(tools, [
     ...inputOptions(input), ...(gif ? ["-ignore_loop", "1"] : []), "-i", input,
     "-map", "0:v:0", "-an", "-sn", "-vf", filters.join(","),
     ...(still ? ["-frames:v", "1"] : []), "-threads", "1", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1",
-  ], signal);
+  ], signal, input);
   process.child.stdin.end();
   const size = width * height * 4;
   const rgba = Buffer.allocUnsafe(size);
@@ -171,6 +194,7 @@ const CODECS: Record<RasterFormat, readonly string[]> = {
 };
 
 export async function encodeFrames(
+  tools: MediaTools,
   output: string,
   options: { width: number; height: number; fps: number; format: RasterFormat; audio?: string; signal?: AbortSignal },
   frames: AsyncIterable<Buffer>,
@@ -179,12 +203,11 @@ export async function encodeFrames(
   signal?.throwIfAborted();
   const args = ["-y", "-filter_complex_threads", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", width + "x" + height,
     "-framerate", String(fps), "-i", "pipe:0"];
-  if (audio) args.push(...inputOptions(audio), "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-shortest");
+  // El vídeo marca la duración aunque su pista de audio termine antes.
+  if (audio) args.push(...inputOptions(audio), "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-af", "apad", "-shortest");
   args.push(...CODECS[format], "-threads", "1", output);
-  const process = ffmpeg(args, signal);
+  const process = ffmpeg(tools, args, signal, audio);
   process.child.stdout.resume();
-  // El error de escritura también llega al callback. El listener evita un error sin atender si FFmpeg sale antes.
-  process.child.stdin.on("error", () => {});
   try {
     for await (const frame of frames) {
       await new Promise<void>((resolveWrite, reject) => {
@@ -196,7 +219,8 @@ export async function encodeFrames(
     if (failure) throw failure;
   } catch (error) {
     await stop(process);
-    if ((error as NodeJS.ErrnoException)?.code === "EPIPE") throw (await process.done) ?? error;
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED") throw (await process.done) ?? error;
     throw error;
   }
 }

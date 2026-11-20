@@ -26,6 +26,9 @@ export interface Messages {
     scormHeading(): string;
     listHeading(): string;
     getHeading(): string;
+    asciiHeading(): string;
+    asciiIntro(p: { program: string }): string[];
+    asciiEnvironment(): string;
     environment(): string[];
     exitCodes(): string[];
     examples(p: { program: string }): string[];
@@ -57,6 +60,18 @@ export interface Messages {
     tuiNeedsTerminal(): string;
     courseNotFound(p: { query: string }): string;
     courseAmbiguous(p: { query: string; matches: string }): string;
+    asciiMissingInput(): string;
+    asciiTooManyInputs(): string;
+    asciiPrepareOnly(): string;
+    asciiInvalidNumber(p: { name: string; raw: string }): string;
+  };
+
+  readonly ascii: {
+    unsupportedPlatform(p: { target: string }): string;
+    preparationFailed(p: { tool: string; status: string }): string;
+    invalidArchive(p: { tool: string }): string;
+    missingDependency(): string;
+    prepared(): string;
   };
 
   readonly commands: {

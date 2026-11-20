@@ -1,5 +1,5 @@
 import type { Messages } from "../i18n/Messages.ts";
-import { GET_OPTIONS, GLOBAL_OPTIONS, LIST_OPTIONS, SCORM_OPTIONS } from "./optionSpecs.ts";
+import { ASCII_GLOBAL_OPTIONS, ASCII_OPTIONS, GET_OPTIONS, GLOBAL_OPTIONS, LIST_OPTIONS, SCORM_OPTIONS } from "./optionSpecs.ts";
 import type { OptionSpec } from "./optionSpecs.ts";
 
 /** Genera la ayuda desde las especificaciones de opciones y el catálogo de mensajes. */
@@ -15,7 +15,7 @@ export class HelpFormatter {
   format(): string {
     const { help } = this.messages;
     const program = this.programName;
-    const width = Math.max(...[...GLOBAL_OPTIONS, ...SCORM_OPTIONS, ...LIST_OPTIONS, ...GET_OPTIONS].map((spec) => this.flags(spec).length));
+    const width = this.width([...GLOBAL_OPTIONS, ...SCORM_OPTIONS, ...LIST_OPTIONS, ...GET_OPTIONS, ...ASCII_OPTIONS]);
     return [
       ...help.intro({ program }),
       help.commandsHeading(),
@@ -33,6 +33,9 @@ export class HelpFormatter {
       help.getHeading(),
       ...this.block(GET_OPTIONS, width),
       "",
+      help.asciiHeading(),
+      ...this.block(ASCII_OPTIONS, width),
+      "",
       ...help.environment(),
       "",
       ...help.exitCodes(),
@@ -40,6 +43,21 @@ export class HelpFormatter {
       ...help.examples({ program }),
       "",
     ].join("\n");
+  }
+
+  formatAscii(): string {
+    const { help } = this.messages;
+    const width = this.width([...ASCII_OPTIONS, ...ASCII_GLOBAL_OPTIONS]);
+    return [
+      ...help.asciiIntro({ program: this.programName }), "",
+      help.asciiHeading(), ...this.block(ASCII_OPTIONS, width), "",
+      help.globalHeading(), ...this.block(ASCII_GLOBAL_OPTIONS, width), "",
+      help.asciiEnvironment(), "",
+    ].join("\n");
+  }
+
+  private width(specs: readonly OptionSpec[]): number {
+    return Math.max(...specs.map((spec) => this.flags(spec).length));
   }
 
   private block(specs: readonly OptionSpec[], width: number): string[] {

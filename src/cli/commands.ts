@@ -1,13 +1,22 @@
-/** Opciones que admiten todas las órdenes. */
-export interface GlobalOptions {
-  readonly platform: string | undefined;
-  readonly baseUrl: URL | undefined;
+import type { ConversionOptions } from "../extensions/ascii/index.ts";
+
+export interface CommonOptions {
   readonly lang: string | undefined;
-  readonly concurrency: number;
   readonly trace: boolean;
   readonly traceDir: string | undefined;
   readonly quiet: boolean;
 }
+
+/** Opciones adicionales para las órdenes que consultan Moodle. */
+export interface GlobalOptions extends CommonOptions {
+  readonly platform: string | undefined;
+  readonly baseUrl: URL | undefined;
+  readonly concurrency: number;
+}
+
+export type AsciiRequest =
+  | { readonly kind: "prepare" }
+  | { readonly kind: "convert"; readonly input: string; readonly options: Omit<ConversionOptions, "signal"> };
 
 export interface ScormOptions {
   readonly scormId: number;
@@ -20,6 +29,7 @@ export interface ScormOptions {
 export type CliCommand =
   | { readonly kind: "help"; readonly text: string }
   | { readonly kind: "version"; readonly text: string }
+  | { readonly kind: "ascii"; readonly global: CommonOptions; readonly request: AsciiRequest }
   | { readonly kind: "scorm"; readonly global: GlobalOptions; readonly scorm: ScormOptions }
   | { readonly kind: "courses"; readonly global: GlobalOptions; readonly json: boolean }
   | { readonly kind: "items"; readonly global: GlobalOptions; readonly course: string; readonly json: boolean }
@@ -34,3 +44,5 @@ export type CliCommand =
     }
   | { readonly kind: "diagnose"; readonly global: GlobalOptions }
   | { readonly kind: "tui"; readonly global: GlobalOptions };
+
+export type MoodleCommand = Exclude<CliCommand, { kind: "help" | "version" | "ascii" }>;

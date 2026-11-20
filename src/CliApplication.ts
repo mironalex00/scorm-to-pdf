@@ -3,9 +3,11 @@ import { join } from "node:path";
 import { SessionCookie } from "./application/SessionCookie.ts";
 import type { HttpClient } from "./application/ports.ts";
 import { CliParser } from "./cli/CliParser.ts";
-import type { CliCommand, GlobalOptions } from "./cli/commands.ts";
+import type { CommonOptions, MoodleCommand } from "./cli/commands.ts";
+import { CliInterruptions } from "./cli/CliInterruptions.ts";
 import { HelpFormatter } from "./cli/HelpFormatter.ts";
 import { CoursesCommand } from "./commands/CoursesCommand.ts";
+import { AsciiCommand } from "./commands/AsciiCommand.ts";
 import type { Command } from "./commands/Command.ts";
 import { DiagnoseCommand } from "./commands/DiagnoseCommand.ts";
 import { GetCommand } from "./commands/GetCommand.ts";
@@ -34,7 +36,6 @@ import type { Tracer } from "./tracing/Tracer.ts";
 import { PROGRAM_NAME, VERSION } from "./version.ts";
 
 const TRACE_RING_SIZE = 500;
-const CANCELLED_EXIT_CODE = 130;
 
 export interface CliApplicationDeps {
   readonly env: Readonly<Record<string, string | undefined>>;
@@ -46,6 +47,7 @@ export interface CliApplicationDeps {
   readonly cwd?: string | undefined;
   /** Teclado y pantalla del selector interactivo; sin él (o sin TTY), el selector no está disponible. */
   readonly terminal?: Terminal | undefined;
+  readonly interruptions?: CliInterruptions;
 }
 
 interface RunState {
@@ -66,6 +68,8 @@ export class CliApplication {
   private readonly stdout: OutputStream;
   private readonly stderr: OutputStream;
   private readonly factory: ServiceFactory;
+  private readonly http: HttpClient | undefined;
+  private readonly interruptions: CliInterruptions;
   private readonly cwd: string;
   private readonly terminal: Terminal | undefined;
   private readonly locales = new LocaleResolver({ catalogs: { es }, defaultLocale: "es" });
@@ -76,6 +80,8 @@ export class CliApplication {
     this.stderr = deps.stderr;
     this.cwd = deps.cwd ?? ".";
     this.terminal = deps.terminal;
+    this.http = deps.http;
+    this.interruptions = deps.interruptions ?? new CliInterruptions();
     this.factory = new ServiceFactory({ http: deps.http, stdout: deps.stdout, stderr: deps.stderr });
   }
 
@@ -108,9 +114,16 @@ export class CliApplication {
       return 0;
     }
 
-    const { global } = command;
     const redactor = new Redactor();
-    const tracer = this.createTracer(global, command.kind === "diagnose", redactor, state);
+    const tracer = this.createTracer(command.global, command.kind === "diagnose", redactor, state);
+    if (command.kind === "ascii") {
+      tracer.event("info", "app", "run.start", { command: command.kind, action: command.request.kind });
+      return new AsciiCommand({
+        request: command.request, cwd: this.cwd, env: this.env, stdout: this.stdout,
+        messages, http: this.http, interruptions: this.interruptions, tracer, quiet: command.global.quiet,
+      }).run();
+    }
+    const { global } = command;
     const registry = new ExtensionRegistry({ extensions: [utcluj], defaultId: utcluj.id, messages });
     const resolved = registry.resolve({ spec: global.platform, baseUrl: global.baseUrl });
     tracer.event("info", "app", "run.start", {
@@ -137,7 +150,7 @@ export class CliApplication {
   }
 
   /** La cookie viene del entorno; solo el selector interactivo puede pedirla si falta. */
-  private async obtainCookie(command: CliCommand, messages: Messages, layout: FrameLayout): Promise<SessionCookie> {
+  private async obtainCookie(command: MoodleCommand, messages: Messages, layout: FrameLayout): Promise<SessionCookie> {
     const fromEnv = this.env.MOODLE_COOKIE;
     if (command.kind !== "tui" || (fromEnv ?? "").trim() !== "") return SessionCookie.parse(fromEnv, messages);
     const typed = await new CookiePrompt({ terminal: this.terminal!, messages, layout }).ask();
@@ -145,7 +158,7 @@ export class CliApplication {
   }
 
   private build(
-    command: Exclude<CliCommand, { kind: "help" | "version" }>,
+    command: MoodleCommand,
     services: Services,
     context: { resolved: ResolvedPlatform; messages: Messages; tracer: Tracer; layout: FrameLayout; tuiLogger: TuiLogger | undefined },
   ): Command {
@@ -195,7 +208,7 @@ export class CliApplication {
     }
   }
 
-  private createTracer(global: GlobalOptions, forced: boolean, redactor: Redactor, state: RunState): Tracer {
+  private createTracer(global: CommonOptions, forced: boolean, redactor: Redactor, state: RunState): Tracer {
     const runId = randomBytes(4).toString("hex");
     state.streaming = global.trace || forced;
     state.announceTrace = global.trace && !forced;
@@ -220,14 +233,15 @@ export class CliApplication {
     if (state.streaming) {
       tracer.flush();
       if (state.announceTrace) this.stderr.write(`${messages.trace.saved({ path: state.traceDir })}\n`);
-    } else if (code !== 0 && code !== 2 && code !== CANCELLED_EXIT_CODE) {
+    } else if (code !== 0 && code !== 2 && code < 128) {
       this.stderr.write(`${messages.trace.savedHint({ path: tracer.flush() ?? state.traceDir })}\n`);
     }
   }
 
   private peekLang(argv: readonly string[]): string | undefined {
+    const terminator = argv.indexOf("--");
     const index = argv.findIndex((arg) => arg === "--lang" || arg.startsWith("--lang="));
-    if (index === -1) return undefined;
+    if (index === -1 || (terminator !== -1 && index > terminator)) return undefined;
     const arg = argv[index]!;
     return arg.startsWith("--lang=") ? arg.slice("--lang=".length) : argv[index + 1];
   }
