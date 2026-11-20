@@ -59,8 +59,8 @@ describe("TuiApplication · camino feliz", () => {
       key("enter"), key("enter"), key("enter"), // continuar, confirmar, carpeta actual
     ]);
     assert.equal(await app.run(), 0);
-    assert.deepEqual(calls, [{ items: ["a", "b"], dest: "carpeta-actual/Alfa" }]);
-    assert.equal(stdout.output, "✓ Descarga completada: 2 archivos nuevos, 0 ya existían — carpeta-actual\n");
+    assert.deepEqual(calls, [{ items: ["a", "b"], dest: "carpeta-actual/content/Alfa" }]);
+    assert.equal(stdout.output, "✓ Descarga completada: 2 archivos nuevos, 0 ya existían — carpeta-actual/content\n");
     assert.equal(stderr.output, "");
     assert.deepEqual([terminal.opened, terminal.closed, terminal.remainingKeys], [1, 1, 0]);
 
@@ -88,7 +88,7 @@ describe("TuiApplication · camino feliz", () => {
   it("un destino distinto se escribe en una línea y se usa tal cual", async () => {
     const { app, calls } = make([key("enter"), key("space"), key("enter"), key("enter"), key("down"), key("enter"), ...chars("mi material"), key("enter")]);
     assert.equal(await app.run(), 0);
-    assert.equal(calls[0]!.dest, "mi material/Alfa");
+    assert.equal(calls[0]!.dest, "mi material/content/Alfa");
   });
 
   it("muestra cuántos se omitieron por existir ya", async () => {
@@ -99,17 +99,15 @@ describe("TuiApplication · camino feliz", () => {
     assert.match(stdout.output, /0 archivos nuevos, 1 ya existían/);
   });
 
-  it("dibuja un gato grande y anima un guiño de un solo ojo", async () => {
+  it("dibuja al oso con el aro en tres posiciones durante tres vueltas", async () => {
     const { app, terminal } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")]);
     assert.equal(await app.run(), 0);
-    assert.equal(terminal.closed, 1);
-    const frames = terminal.frames.slice(-3).map((lines) => lines.join("\n"));
-    assert.equal(frames.length, 3);
-    assert.ok(frames.every((frame) => frame.startsWith("Mulțumesc!")));
-    assert.match(frames[0]!, /\(  o  \) +\(  o  \)/);
-    assert.match(frames[1]!, /\( _\._ \) +\(  o  \)/);
-    assert.match(frames[2]!, />---< +\(  o  \)/);
-    assert.ok(terminal.frames.at(-1)!.filter((line) => /[+|/'_.\\]/.test(line)).length >= 15);
+    const frames = terminal.frames.filter((frame) => frame[0] === "Mulțumesc!");
+    assert.equal(frames.length, 9);
+    assert.match(frames[0]!.join("\n"), /\.--------\)/);
+    assert.match(frames[1]!.join("\n"), /\.---'/);
+    assert.match(frames[2]!.join("\n"), /\.___|\._ ________/);
+    assert.deepEqual(frames.slice(0, 3), frames.slice(6, 9));
   });
 
   it("permite continuar si uno de los cursos elegidos carece de materiales", async () => {
@@ -119,7 +117,7 @@ describe("TuiApplication · camino feliz", () => {
     ]);
     assert.equal(await app.run(), 0);
     assert.match(terminal.allFrames(), /Este curso no tiene contenido descargable/);
-    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Alfa" }]);
+    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/content/Alfa" }]);
   });
 
   it("vuelve al selector si ninguno de los cursos elegidos tiene materiales", async () => {
@@ -157,7 +155,7 @@ describe("TuiApplication · navegación", () => {
     ], { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("z", "Z", 1)] } } });
     assert.equal(await app.run(), 0);
     assert.match(terminal.allFrames(), /Curso 2 de 2/);
-    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Alfa" }, { items: ["z"], dest: "carpeta-actual/Beta" }]);
+    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/content/Alfa" }, { items: ["z"], dest: "carpeta-actual/content/Beta" }]);
   });
 
   it("Esc en los contenidos vuelve a la lista de cursos y permite elegir otro", async () => {
@@ -177,7 +175,7 @@ describe("TuiApplication · navegación", () => {
       key("enter"), key("enter"), // confirma y elige la carpeta actual
     ]);
     assert.equal(await app.run(), 0);
-    assert.equal(calls[0]!.dest, "carpeta-actual/Alfa");
+    assert.equal(calls[0]!.dest, "carpeta-actual/content/Alfa");
   });
 
   it("recupera las marcas al volver a entrar en el mismo curso", async () => {
@@ -188,7 +186,7 @@ describe("TuiApplication · navegación", () => {
     ]);
     assert.equal(await app.run(), 0);
     assert.match(terminal.allFrames(), /\[x\] Tema A/);
-    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Alfa" }]);
+    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/content/Alfa" }]);
   });
 
   it("guarda las marcas por curso al alternar entre dos cursos elegidos individualmente", async () => {
@@ -202,7 +200,21 @@ describe("TuiApplication · navegación", () => {
     const beta = terminal.frames.filter((frame) => frame[0]?.startsWith("«Beta»"));
     assert.match(beta[0]!.join("\n"), /\[ \] Z/);
     assert.match(beta.at(-1)!.join("\n"), /\[x\] Z/);
-    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Beta" }]);
+    assert.deepEqual(calls, [
+      { items: ["a"], dest: "carpeta-actual/content/Alfa" },
+      { items: ["a"], dest: "carpeta-actual/content/Beta" },
+    ]);
+  });
+
+  it("desmarcar un curso en la lista excluye sus materiales del total", async () => {
+    const { app, terminal, calls } = make([
+      key("enter"), key("space"), key("escape"),
+      key("space"), key("down"), key("enter"),
+      key("space"), key("enter"), key("enter"), key("enter"),
+    ], { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("z", "Z", 1)] } } });
+    assert.equal(await app.run(), 0);
+    assert.match(terminal.allFrames(), /Cursos marcados: 1[\s\S]*\[x\] Alfa[\s\S]*Cursos marcados: 0/);
+    assert.deepEqual(calls, [{ items: ["z"], dest: "carpeta-actual/content/Beta" }]);
   });
 });
 

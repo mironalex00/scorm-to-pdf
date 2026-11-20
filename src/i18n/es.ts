@@ -166,6 +166,7 @@ export const es: Messages = {
     keysMessage: () => "Pulsa una tecla para salir",
     downloading: (p) => `Descargando ${p.done}/${p.total}: ${p.label}`,
     errorsTitle: () => "Hubo errores en la descarga",
+    unexpectedTitle: () => "No se pudo continuar",
     success: (p) => `✓ Descarga completada: ${p.downloaded} archivos nuevos, ${p.skipped} ya existían — ${p.dest}`,
     farewell: () => "Mulțumesc!",
     cancelled: () => "Cancelado.",

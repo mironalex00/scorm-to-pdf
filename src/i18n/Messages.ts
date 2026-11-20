@@ -112,6 +112,7 @@ export interface Messages {
     keysMessage(): string;
     downloading(p: { done: string; total: string; label: string }): string;
     errorsTitle(): string;
+    unexpectedTitle(): string;
     success(p: { downloaded: string; skipped: string; dest: string }): string;
     farewell(): string;
     cancelled(): string;

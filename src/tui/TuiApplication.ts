@@ -11,6 +11,7 @@ import type { Messages } from "../i18n/Messages.ts";
 import type { OutputStream } from "../infra/ConsoleLogger.ts";
 import type { FrameLayout } from "./FrameLayout.ts";
 import { ScreenRunner } from "./ScreenRunner.ts";
+import { BEAR_HOOP, HAMMER_POINT, STARTLED_BOY } from "./animationFrames.ts";
 import { CourseSelectionScreen } from "./screens/CourseSelectionScreen.ts";
 import { ItemSelectionScreen } from "./screens/ItemSelectionScreen.ts";
 import { ListScreen } from "./screens/ListScreen.ts";
@@ -20,7 +21,7 @@ import type { Terminal } from "./Terminal.ts";
 import type { TuiLogger } from "./TuiLogger.ts";
 
 export interface ItemBatch {
-  run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[]): Promise<BatchReport>;
+  run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[], itemFolders: { allItems: readonly CourseItem[] }): Promise<BatchReport>;
 }
 
 type Step = "course" | "items" | "confirm" | "destination";
@@ -28,47 +29,13 @@ interface CourseSelection {
   readonly course: CourseSummary;
   readonly sections: readonly Section[];
   readonly items: readonly CourseItem[];
+  readonly allItems: readonly CourseItem[];
 }
 type Outcome = { kind: "cancelled" } | { kind: "finished"; report: BatchReport; dest: string };
 type Destination = { kind: "cancelled" } | { kind: "back" } | { kind: "path"; path: string };
 
 const CANCELLED_EXIT_CODE = 130;
 const BAR_WIDTH = 30;
-const CAT_EARS = [
-  "          /\\                        /\\",
-  "         /  \\__                  __/  \\",
-  "        / /\\   \\________________/   /\\ \\",
-  "       / /  '.                    .'  \\ \\",
-  "      | /     '.                .'     \\ |",
-  "      |/                                \\|",
-  "      /                                  \\",
-];
-const CAT_MUZZLE = [
-  "  ---+----             (__)            ----+---",
-  "   --+---              /  \\             ---+--",
-  "      \\          ._   /    \\   _.          /",
-  "       '.          '--'    '--'          .'",
-  "         '-._                         _.-'",
-  "             '-------._______.-------'",
-];
-const CAT_EYES = [
-  [
-    "     |        .-\"\"\"-.        .-\"\"\"-.      |",
-    "     |        (  o  )        (  o  )      |",
-    "     |         '-.-'    /\\    '-.-'       |",
-  ],
-  [
-    "     |        .-----.        .-\"\"\"-.      |",
-    "     |        ( _._ )        (  o  )      |",
-    "     |                  /\\    '-.-'       |",
-  ],
-  [
-    "     |        _     _        .-\"\"\"-.      |",
-    "     |         >---<         (  o  )      |",
-    "     |                  /\\    '-.-'       |",
-  ],
-];
-
 /**
  * Selección de cursos y de contenidos por curso, seguida de una confirmación y un destino comunes.
  */
@@ -119,8 +86,11 @@ export class TuiApplication {
     try {
       outcome = await this.flow();
       if (outcome.kind === "finished" && outcome.report.failed === 0 && !outcome.report.aborted) {
-        await this.farewell();
+        await this.animate(this.messages.tui.farewell(), BEAR_HOOP, 3);
       }
+    } catch (error) {
+      await this.animate(this.messages.tui.unexpectedTitle(), STARTLED_BOY);
+      throw error;
     } finally {
       this.terminal.close();
     }
@@ -140,8 +110,10 @@ export class TuiApplication {
 
     for (;;) {
       if (step === "course") {
+        const withMaterials = new Set([...selections.values()].filter(({ items }) => items.length > 0).map(({ course }) => course.id));
         const result = await this.runner.run(new CourseSelectionScreen({
-          courses, marked: markedCourses, layout: this.layout, messages: this.messages,
+          courses, marked: markedCourses, withMaterials, discardMaterials: (id) => selections.delete(id),
+          layout: this.layout, messages: this.messages,
         }));
         if (result.kind !== "done") return { kind: "cancelled" };
         chosen = result.value;
@@ -162,6 +134,7 @@ export class TuiApplication {
           course,
           sections: this.catalog.sectionsOf(contents),
           items: result.kind === "back" ? screen.selection() : result.value,
+          allItems: contents.items,
         });
         if (result.kind === "back") {
           if (courseIndex === 0) step = "course";
@@ -170,7 +143,10 @@ export class TuiApplication {
           if (courseIndex < chosen.length - 1) {
             courseIndex += 1;
           } else {
-            selected = chosen.map(({ id }) => selections.get(id)!).filter(({ items }) => items.length > 0);
+            selected = courses.flatMap(({ id }) => {
+              const selection = selections.get(id);
+              return selection && selection.items.length > 0 ? [selection] : [];
+            });
             step = selected.length === 0 ? "course" : "confirm";
           }
         }
@@ -262,6 +238,7 @@ export class TuiApplication {
   }
 
   private async download(selected: readonly CourseSelection[], dest: string, folders: ReadonlyMap<string, string>): Promise<Outcome> {
+    const contentRoot = join(dest, "content");
     const total = this.totalItems(selected);
     const outcomes: BatchReport["outcomes"] = [];
     let downloaded = 0;
@@ -270,8 +247,8 @@ export class TuiApplication {
     let aborted = false;
     this.logger.onProgress((update) => this.showProgress({ ...update, done: outcomes.length + update.done, total }));
     this.showProgress({ done: 0, total, label: "" });
-    for (const { course, sections, items } of selected) {
-      const result = await this.batch.run(items, join(dest, folders.get(course.id)!), sections);
+    for (const { course, sections, items, allItems } of selected) {
+      const result = await this.batch.run(items, join(contentRoot, folders.get(course.id)!), sections, { allItems });
       outcomes.push(...result.outcomes);
       downloaded += result.downloaded;
       skipped += result.skipped;
@@ -280,8 +257,11 @@ export class TuiApplication {
       if (aborted) break;
     }
     const report = { outcomes, downloaded, skipped, failed, aborted };
-    if (report.failed > 0 || report.aborted) await this.runner.run(this.errorsScreen(report));
-    return { kind: "finished", report, dest };
+    if (report.failed > 0 || report.aborted) {
+      await this.animate(this.messages.tui.errorsTitle(), HAMMER_POINT);
+      await this.runner.run(this.errorsScreen(report));
+    }
+    return { kind: "finished", report, dest: contentRoot };
   }
 
   private showProgress(update: ProgressUpdate): void {
@@ -342,9 +322,9 @@ export class TuiApplication {
     return this.printer.exitCode(report);
   }
 
-  private async farewell(): Promise<void> {
-    for (const [index, eyes] of CAT_EYES.entries()) {
-      const frame = [...CAT_EARS, ...eyes, ...CAT_MUZZLE];
+  private async animate(title: string, frames: readonly (readonly string[])[], cycles = 1): Promise<void> {
+    const timeline = Array.from({ length: cycles }, () => frames).flat();
+    for (const [index, frame] of timeline.entries()) {
       const size = this.terminal.size();
       const rows = this.layout.bodyHeight(size);
       const columns = Math.max(2, size.columns - 1);
@@ -354,7 +334,7 @@ export class TuiApplication {
       const cropColumn = Math.max(0, Math.floor((width - columns) / 2));
       const indent = " ".repeat(Math.max(0, Math.floor((columns - width) / 2)));
       this.terminal.render(this.layout.compose({
-        title: this.messages.tui.farewell(),
+        title,
         body: [
           ...Array<string>(top).fill(""),
           ...frame.slice(cropRow, cropRow + rows).map((line) => indent + line.slice(cropColumn, cropColumn + columns)),
@@ -362,7 +342,7 @@ export class TuiApplication {
         footer: "",
         size,
       }));
-      await setTimeout(index === CAT_EYES.length - 1 ? 760 : 175);
+      await setTimeout(index === timeline.length - 1 ? 320 : 145);
     }
   }
 }

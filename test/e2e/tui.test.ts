@@ -51,8 +51,8 @@ describe("e2e · selector interactivo", () => {
     const { code, terminal, stdout, stderr } = await run(moodle, [...chooseFirstCourseAndMarkAll, key("enter"), key("enter")]);
 
     assert.equal(code, 0, stderr);
-    assert.deepEqual(await pdfs(work), ["Algoritmi fundamentali/General/Programa.pdf", "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf", "Algoritmi fundamentali/Săptămâna 1/Exerciții & teme.pdf", "Algoritmi fundamentali/Săptămâna 3/Complementar.pdf"]);
-    assert.equal((await readFile(join(work, "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf"))).subarray(0, 4).toString("latin1"), "%PDF");
+    assert.deepEqual(await pdfs(work), ["content/Algoritmi fundamentali/General/Programa/Programa.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții/Curs 5. Funcții.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Exerciții & teme/Exerciții & teme.pdf", "content/Algoritmi fundamentali/Săptămâna 3/Complementar/Complementar.pdf"]);
+    assert.equal((await readFile(join(work, "content/Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții/Curs 5. Funcții.pdf"))).subarray(0, 4).toString("latin1"), "%PDF");
     assert.match(stdout, /^✓ Descarga completada: 4 archivos nuevos, 0 ya existían/);
     assert.equal(stderr, "");
     assert.deepEqual([terminal.opened, terminal.closed, terminal.remainingKeys], [1, 1, 0]);
@@ -65,7 +65,7 @@ describe("e2e · selector interactivo", () => {
     const keys = [...chooseFirstCourseAndMarkAll, key("enter"), key("down"), key("enter"), ...chars(custom), key("enter")];
     const { code } = await run(await server(), keys);
     assert.equal(code, 0);
-    assert.deepEqual(await pdfs(custom), ["Algoritmi fundamentali/General/Programa.pdf", "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf", "Algoritmi fundamentali/Săptămâna 1/Exerciții & teme.pdf", "Algoritmi fundamentali/Săptămâna 3/Complementar.pdf"]);
+    assert.deepEqual(await pdfs(custom), ["content/Algoritmi fundamentali/General/Programa/Programa.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții/Curs 5. Funcții.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Exerciții & teme/Exerciții & teme.pdf", "content/Algoritmi fundamentali/Săptămâna 3/Complementar/Complementar.pdf"]);
   });
 
   it("muestra una subsección del cuerpo del curso y descarga su material", async () => {
@@ -74,10 +74,10 @@ describe("e2e · selector interactivo", () => {
     ]);
     assert.equal(code, 0, stderr);
     assert.match(terminal.allFrames(), /Semana 2 — Tema[\s\S]*Tema 1 {2}\(recurso\)/);
-    assert.deepEqual(await pdfs(work), ["Structuri de date/Tema/Tema 1.pdf"]);
+    assert.deepEqual(await pdfs(work), ["content/Structuri de date/Tema/Tema 1/Tema 1.pdf"]);
   });
 
-  it("con teclas de terminal, retrocede entre cursos sin perder marcas y muestra la despedida antes de salir", async () => {
+  it("marca el curso al elegir contenido y Enter reúne materiales de cursos visitados por separado", async () => {
     const moodle = await server();
     const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: (_mode: boolean) => undefined });
     const stdout = new CapturedStream(true, 80);
@@ -101,22 +101,9 @@ describe("e2e · selector interactivo", () => {
       await screen("Tus cursos");
       await type("\r", "[ ] Programa");
       await type(" ", "[x] Programa");
-      await type("\x1b", "Tus cursos");
-      await type("\r", "[x] Programa");
-      await type("\x1b", "Tus cursos");
+      await type("\x1b", "[x] Algoritmi fundamentali");
       await type("\x1b[B\r", "[ ] Tema 1");
       await type(" ", "[x] Tema 1");
-      await type("\x1b", "Tus cursos");
-      await type(" ", "Cursos marcados: 1");
-      await type("\x1b[B ", "Cursos marcados: 2");
-      await type(" ", "Cursos marcados: 1");
-      await type("A", "Cursos marcados: 2");
-      await type("A", "Cursos marcados: 0");
-      await type("A", "Cursos marcados: 2");
-      await type("\r", "Curso 1 de 2");
-      await type("\r", "[x] Tema 1");
-      await type("\x1b", "Curso 1 de 2");
-      await type("\r", "[x] Tema 1");
       await type("\r", "Confirmar la descarga de 2 contenidos");
       await type("\r", "guardar los archivos");
       await type("\r", "Mulțumesc!");
@@ -126,18 +113,19 @@ describe("e2e · selector interactivo", () => {
     }
 
     assert.deepEqual(await pdfs(work), [
-      "Algoritmi fundamentali/General/Programa.pdf",
-      "Structuri de date/Tema/Tema 1.pdf",
+      "content/Algoritmi fundamentali/General/Programa/Programa.pdf",
+      "content/Structuri de date/Tema/Tema 1/Tema 1.pdf",
     ]);
     assert.match(stdout.output, /Descargando 2\/2: Tema 1/);
-    assert.match(stdout.output, /Mulțumesc![\s\S]*\(  o  \) +\(  o  \)[\s\S]*Mulțumesc![\s\S]*\( _\._ \)[\s\S]*Mulțumesc![\s\S]*>---< +\(  o  \)[\s\S]*\x1b\[\?1049l✓ Descarga completada: 2 archivos nuevos/);
+    assert.equal(stdout.output.match(/Mulțumesc!/g)?.length, 9);
+    assert.match(stdout.output, /Mulțumesc![\s\S]*\.--------\)[\s\S]*Mulțumesc![\s\S]*\.---'[\s\S]*\x1b\[\?1049l✓ Descarga completada: 2 archivos nuevos/);
   });
 
   it("puede elegir solo una semana con a y descargarla", async () => {
     // Cursor en la primera semana (0): «a» marca solo Programa.
     const { code } = await run(await server(), [key("enter"), ...chars("a"), key("enter"), key("enter"), key("enter")]);
     assert.equal(code, 0);
-    assert.deepEqual(await pdfs(work), ["Algoritmi fundamentali/General/Programa.pdf"]);
+    assert.deepEqual(await pdfs(work), ["content/Algoritmi fundamentali/General/Programa/Programa.pdf"]);
   });
 
   it("Ctrl+C cancela con 130, restaura la terminal y no deja archivos ni traza", async () => {
@@ -152,15 +140,17 @@ describe("e2e · selector interactivo", () => {
     const moodle = await server({ failItems: ["531"] });
     const { code, terminal, stderr } = await run(moodle, [...chooseFirstCourseAndMarkAll, key("enter"), key("enter"), key("space")]);
     assert.equal(code, 1);
+    assert.match(terminal.allFrames(), /\|==\|/);
     assert.match(terminal.allFrames(), /Hubo errores en la descarga[\s\S]*Fallo en «Complementar»/);
     assert.match(stderr, /Fallo en «Complementar»[\s\S]*Descargados: 3 · Omitidos: 0 · Fallidos: 1[\s\S]*Traza guardada en/);
-    assert.deepEqual(await pdfs(work), ["Algoritmi fundamentali/General/Programa.pdf", "Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții.pdf", "Algoritmi fundamentali/Săptămâna 1/Exerciții & teme.pdf"]);
+    assert.deepEqual(await pdfs(work), ["content/Algoritmi fundamentali/General/Programa/Programa.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții/Curs 5. Funcții.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Exerciții & teme/Exerciții & teme.pdf"]);
   });
 
   it("una sesión no válida termina con 3 y la terminal restaurada", async () => {
     const { code, terminal, stderr } = await run(await server(), [], { MOODLE_COOKIE: "caducada-000000" });
     assert.equal(code, 3);
     assert.match(stderr, /Moodle no reconoce la sesión/);
+    assert.match(terminal.allFrames(), /No se pudo continuar[\s\S]*\(o\)/);
     assert.deepEqual([terminal.opened, terminal.closed], [1, 1]);
   });
 
