@@ -87,8 +87,10 @@ export interface Messages {
     loadingCourses(): string;
     loadingContents(p: { course: string }): string;
     coursesTitle(): string;
+    markedCourses(p: { count: string }): string;
     noCourses(): string;
     itemsTitle(p: { course: string }): string;
+    coursePosition(p: { current: string; total: string }): string;
     noItems(): string;
     nothingMarked(): string;
     selectedCount(p: { count: string }): string;

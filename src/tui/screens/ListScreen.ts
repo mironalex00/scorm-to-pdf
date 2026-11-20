@@ -37,13 +37,13 @@ export class ListScreen<T> implements Screen<T> {
     this.layout = deps.layout;
   }
 
-  render(size: TerminalSize): string[] {
+  render(size: TerminalSize, subtitle = this.subtitle): string[] {
     this.page = this.layout.bodyHeight(size);
     const body =
       this.items.length === 0
         ? [this.emptyMessage]
         : this.visibleRows(size);
-    return this.layout.compose({ title: this.title, subtitle: this.subtitle, body, footer: this.footer, size });
+    return this.layout.compose({ title: this.title, subtitle, body, footer: this.footer, size });
   }
 
   press(key: KeyPress): ScreenResult<T> {

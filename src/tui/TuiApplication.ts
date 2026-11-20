@@ -89,6 +89,9 @@ export class TuiApplication {
     let outcome: Outcome;
     try {
       outcome = await this.flow();
+      if (outcome.kind === "finished" && outcome.report.failed === 0 && !outcome.report.aborted) {
+        await this.farewell();
+      }
     } finally {
       this.terminal.close();
     }
@@ -113,7 +116,7 @@ export class TuiApplication {
         }));
         if (result.kind !== "done") return { kind: "cancelled" };
         chosen = result.value;
-        selections.clear();
+        if (chosen.length === 1) selections.clear();
         courseIndex = 0;
         step = "items";
       } else if (step === "items") {
@@ -121,13 +124,21 @@ export class TuiApplication {
         const contents = await this.loading(tui.loadingContents({ course: course.name }), () => this.catalog.contents(course));
         const previous = selections.get(course.id)?.items ?? [];
         const marked = new Set(previous.map((item) => item.id));
-        const result = await this.runner.run(this.itemsScreen(course, contents, marked, chosen.length > 1));
+        const position = chosen.length > 1
+          ? tui.coursePosition({ current: String(courseIndex + 1), total: String(chosen.length) })
+          : undefined;
+        const screen = this.itemsScreen(course, contents, marked, position);
+        const result = await this.runner.run(screen);
         if (result.kind === "cancel") return { kind: "cancelled" };
+        selections.set(course.id, {
+          course,
+          sections: this.catalog.sectionsOf(contents),
+          items: result.kind === "back" ? screen.selection() : result.value,
+        });
         if (result.kind === "back") {
           if (courseIndex === 0) step = "course";
           else courseIndex -= 1;
         } else {
-          selections.set(course.id, { course, sections: this.catalog.sectionsOf(contents), items: result.value });
           if (courseIndex < chosen.length - 1) {
             courseIndex += 1;
           } else {
@@ -148,7 +159,7 @@ export class TuiApplication {
     }
   }
 
-  private itemsScreen(course: CourseSummary, contents: CourseContents, marked: ReadonlySet<string>, skipEmpty: boolean): ItemSelectionScreen {
+  private itemsScreen(course: CourseSummary, contents: CourseContents, marked: ReadonlySet<string>, position: string | undefined): ItemSelectionScreen {
     const weeks = this.catalog
       .sectionsOf(contents)
       .map((section) => ({ section, items: this.catalog.itemsIn(contents, section.number) }));
@@ -156,7 +167,8 @@ export class TuiApplication {
       title: this.messages.tui.itemsTitle({ course: course.name }),
       weeks,
       marked,
-      skipEmpty,
+      skipEmpty: position !== undefined,
+      position,
       layout: this.layout,
       messages: this.messages,
     });
@@ -284,7 +296,7 @@ export class TuiApplication {
     return work();
   }
 
-  private async finish(outcome: Outcome): Promise<number> {
+  private finish(outcome: Outcome): number {
     const { tui, commands } = this.messages;
     if (outcome.kind === "cancelled") {
       this.stderr.write(`${tui.cancelled()}\n`);
@@ -293,8 +305,6 @@ export class TuiApplication {
     const { report, dest } = outcome;
     if (report.failed === 0 && !report.aborted) {
       this.stdout.write(`${tui.success({ downloaded: String(report.downloaded), skipped: String(report.skipped), dest })}\n`);
-      this.stdout.write(`${tui.farewell()}\n`);
-      await this.smile();
       return 0;
     }
     for (const line of this.failureLines(report)) this.stderr.write(`${line}\n`);
@@ -304,17 +314,18 @@ export class TuiApplication {
     return this.printer.exitCode(report);
   }
 
-  private async smile(): Promise<void> {
-    if (this.stdout.isTTY !== true || this.terminal.size().columns < 12) {
-      this.stdout.write(":)\n");
-      return;
-    }
+  private async farewell(): Promise<void> {
     for (const [index, frame] of SMILE_FRAMES.entries()) {
-      if (index > 0) {
-        await setTimeout(110);
-        this.stdout.write(`\x1b[${frame.length}A`);
-      }
-      this.stdout.write(`${frame.join("\n")}\n`);
+      const size = this.terminal.size();
+      const top = Math.max(0, Math.floor((this.layout.bodyHeight(size) - frame.length) / 2));
+      const indent = " ".repeat(Math.max(0, Math.floor((size.columns - frame[0]!.length - 1) / 2)));
+      this.terminal.render(this.layout.compose({
+        title: this.messages.tui.farewell(),
+        body: [...Array<string>(top).fill(""), ...frame.map((line) => indent + line)],
+        footer: "",
+        size,
+      }));
+      await setTimeout(index === SMILE_FRAMES.length - 1 ? 600 : 130);
     }
   }
 }
