@@ -7,6 +7,7 @@ import type { ProgressUpdate } from "../application/ports.ts";
 import type { ReportPrinter } from "../application/ReportPrinter.ts";
 import type { CourseContents, CourseItem, CourseSummary, Section } from "../domain/catalog.ts";
 import { errorMessage } from "../domain/errors.ts";
+import { fitAsciiFrame } from "../extensions/ascii/viewport.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { OutputStream } from "../infra/ConsoleLogger.ts";
 import type { FrameLayout } from "./FrameLayout.ts";
@@ -326,19 +327,9 @@ export class TuiApplication {
     const timeline = Array.from({ length: cycles }, () => frames).flat();
     for (const [index, frame] of timeline.entries()) {
       const size = this.terminal.size();
-      const rows = this.layout.bodyHeight(size);
-      const columns = Math.max(2, size.columns - 1);
-      const width = Math.max(...frame.map((line) => line.length));
-      const top = Math.max(0, Math.floor((rows - frame.length) / 2));
-      const cropRow = Math.max(0, Math.floor((frame.length - rows) / 2));
-      const cropColumn = Math.max(0, Math.floor((width - columns) / 2));
-      const indent = " ".repeat(Math.max(0, Math.floor((columns - width) / 2)));
       this.terminal.render(this.layout.compose({
         title,
-        body: [
-          ...Array<string>(top).fill(""),
-          ...frame.slice(cropRow, cropRow + rows).map((line) => indent + line.slice(cropColumn, cropColumn + columns)),
-        ],
+        body: fitAsciiFrame(frame, Math.max(2, size.columns - 1), this.layout.bodyHeight(size)),
         footer: "",
         size,
       }));
