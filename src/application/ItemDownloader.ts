@@ -9,6 +9,7 @@ export interface DownloadTarget {
   /** Nombre sin extensión, ya saneado y sin duplicados (lo decide el NamePlanner). */
   readonly baseName: string;
   readonly sectionFolder?: string;
+  readonly groupByItem?: boolean;
 }
 
 export type ItemOutcome =
@@ -69,7 +70,7 @@ export class ItemDownloader implements ItemTransfer {
         content = rendered.pdf;
       }
 
-      const path = this.namer.itemPath(target.destRoot, item, fileName, target.sectionFolder);
+      const path = this.namer.itemPath(target.destRoot, item, fileName, target.sectionFolder, target.groupByItem ? target.baseName : "");
       if (await this.sink.exists(path)) {
         tracer.event("info", "download", "skipped.exists", { path });
         return { item, status: "skipped", path };
