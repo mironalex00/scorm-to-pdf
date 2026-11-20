@@ -102,6 +102,8 @@ export interface Messages {
     cookieLines(): string[];
     cookieLabel(): string;
     keysList(): string;
+    keysCourses(): string;
+    keysEmptyCourse(): string;
     keysItems(): string;
     keysConfirm(): string;
     keysPrompt(): string;
@@ -109,6 +111,7 @@ export interface Messages {
     downloading(p: { done: string; total: string; label: string }): string;
     errorsTitle(): string;
     success(p: { downloaded: string; skipped: string; dest: string }): string;
+    farewell(): string;
     cancelled(): string;
   };
 

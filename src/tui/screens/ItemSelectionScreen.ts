@@ -19,25 +19,28 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
   private readonly marked: Set<string>;
   private readonly layout: FrameLayout;
   private readonly messages: Messages;
+  private readonly skipEmpty: boolean;
   private readonly scroll = new ScrollWindow();
   private cursor = 0;
   private page = DEFAULT_PAGE;
   private notice: string | undefined;
 
-  constructor(deps: { title: string; weeks: readonly Week[]; marked: ReadonlySet<string>; layout: FrameLayout; messages: Messages }) {
+  constructor(deps: { title: string; weeks: readonly Week[]; marked: ReadonlySet<string>; layout: FrameLayout; messages: Messages; skipEmpty?: boolean }) {
     this.title = deps.title;
     this.weeks = deps.weeks.filter((week) => week.items.length > 0);
     this.flat = this.weeks.flatMap((week) => week.items);
     this.marked = new Set(deps.marked);
     this.layout = deps.layout;
     this.messages = deps.messages;
+    this.skipEmpty = deps.skipEmpty ?? false;
   }
 
   render(size: TerminalSize): string[] {
     this.page = this.layout.bodyHeight(size);
     const { tui, commands } = this.messages;
     if (this.flat.length === 0) {
-      return this.layout.compose({ title: this.title, body: [tui.noItems()], footer: tui.keysList(), size });
+      const footer = this.skipEmpty ? tui.keysEmptyCourse() : tui.keysList();
+      return this.layout.compose({ title: this.title, body: [tui.noItems()], footer, size });
     }
 
     const rows: Array<{ text: string; selected: boolean }> = [];
@@ -63,7 +66,9 @@ export class ItemSelectionScreen implements Screen<CourseItem[]> {
   press(key: KeyPress): ScreenResult<CourseItem[]> {
     if (key.name === "ctrl-c") return { kind: "cancel" };
     if (key.name === "escape" || (key.name === "char" && key.char === "q")) return { kind: "back" };
-    if (this.flat.length === 0) return { kind: "stay" };
+    if (this.flat.length === 0) {
+      return this.skipEmpty && key.name === "enter" ? { kind: "done", value: [] } : { kind: "stay" };
+    }
 
     this.notice = undefined;
     const last = this.flat.length - 1;
