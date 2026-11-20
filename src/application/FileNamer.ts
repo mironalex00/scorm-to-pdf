@@ -48,8 +48,23 @@ export class FileNamer {
     return String(sectionNumber);
   }
 
-  itemPath(destRoot: string, item: CourseItem, fileName: string): string {
-    return join(destRoot, this.sectionDir(item.sectionNumber), fileName);
+  directoryNames<Key>(entries: Iterable<readonly [Key, string]>): Map<Key, string> {
+    const names = new Map<Key, string>();
+    const used = new Set<string>();
+    for (const [key, title] of entries) {
+      const base = this.baseName(title);
+      let folder = base;
+      for (let suffix = 2; used.has(folder.toLowerCase()); suffix += 1) {
+        folder = `${base} (${suffix})`;
+      }
+      names.set(key, folder);
+      used.add(folder.toLowerCase());
+    }
+    return names;
+  }
+
+  itemPath(destRoot: string, item: CourseItem, fileName: string, sectionFolder?: string): string {
+    return join(destRoot, sectionFolder ?? this.sectionDir(item.sectionNumber), fileName);
   }
 
   private extensionFor(sourceFileName: string, contentType: string | undefined): string {

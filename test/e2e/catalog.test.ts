@@ -91,13 +91,13 @@ describe("e2e · descargar", () => {
   it("get --all crea <destino>/<semana>/<nombre><ext>: archivos tal cual y SCORM convertido a PDF", async () => {
     const { code, stdout, stderr } = await run(await server(), ["get", "algoritmi", "--all", "--dest", dest(), "-q"]);
     assert.equal(code, 0, stderr);
-    assert.deepEqual(await files(dest()), ["0/Programa.pdf", "1/Curs 5. Funcții.pdf", "1/Exerciții & teme.pdf", "3/Complementar.pdf"]);
+    assert.deepEqual(await files(dest()), ["General/Programa.pdf", "Săptămâna 1/Curs 5. Funcții.pdf", "Săptămâna 1/Exerciții & teme.pdf", "Săptămâna 3/Complementar.pdf"]);
     for (const file of await files(dest())) {
       assert.equal((await readFile(join(dest(), file))).subarray(0, 4).toString("latin1"), "%PDF");
     }
     assert.equal(stdout.trimEnd().split("\n").length, 4, "con -q solo se imprimen las rutas");
     // el SCORM pasa por la conversión de imágenes: 2 diapositivas → 2 páginas
-    assert.match((await readFile(join(dest(), "1/Curs 5. Funcții.pdf"))).toString("latin1"), /\/Count 2 >>/);
+    assert.match((await readFile(join(dest(), "Săptămâna 1/Curs 5. Funcții.pdf"))).toString("latin1"), /\/Count 2 >>/);
   });
 
   it("una segunda ejecución omite lo que ya existe sin sobrescribirlo", async () => {
@@ -112,9 +112,9 @@ describe("e2e · descargar", () => {
   it("--week y --item eligen solo lo pedido", async () => {
     const moodle = await server();
     await run(moodle, ["get", "algoritmi", "--week", "3", "--dest", dest(), "-q"]);
-    assert.deepEqual(await files(dest()), ["3/Complementar.pdf"]);
+    assert.deepEqual(await files(dest()), ["Săptămâna 3/Complementar.pdf"]);
     await run(moodle, ["get", "algoritmi", "--item", "501", "--dest", dest(), "-q"]);
-    assert.deepEqual(await files(dest()), ["0/Programa.pdf", "3/Complementar.pdf"]);
+    assert.deepEqual(await files(dest()), ["General/Programa.pdf", "Săptămâna 3/Complementar.pdf"]);
   });
 
   it("una selección vacía (semana inexistente) es un error de uso", async () => {

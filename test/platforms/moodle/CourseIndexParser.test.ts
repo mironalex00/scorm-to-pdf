@@ -98,4 +98,15 @@ describe("CourseIndexParser", () => {
     `);
     assert.deepEqual(contents.sections, [{ number: 1, title: "Tema" }]);
   });
+
+  it("prefiere el texto del título del índice cuando el cuerpo usa otra etiqueta", () => {
+    const { contents } = parse(COURSE_BODY + `
+      <div class="courseindex-section" data-number="15" data-sectionname="Otra etiqueta">
+        <a class="courseindex-link text-truncate" data-action="togglecourseindexsection" data-for="section_title" tabindex="-1">
+          Curs 1 &amp; aplicații
+        </a>
+      </div>`);
+    assert.deepEqual(contents.sections.find(({ number }) => number === 15), { number: 15, title: "Curs 1 & aplicații" });
+    assert.equal(contents.items[0]?.sectionNumber, 15);
+  });
 });

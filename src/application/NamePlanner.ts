@@ -1,4 +1,4 @@
-import type { CourseItem } from "../domain/catalog.ts";
+import type { CourseItem, Section } from "../domain/catalog.ts";
 import type { FileNamer } from "./FileNamer.ts";
 
 /**
@@ -10,6 +10,11 @@ export class NamePlanner {
 
   constructor(deps: { namer: FileNamer }) {
     this.namer = deps.namer;
+  }
+
+  sectionFolders(sections: readonly Section[]): Map<number, string> {
+    const ordered = [...sections].sort((a, b) => a.number - b.number);
+    return this.namer.directoryNames(ordered.map(({ number, title }) => [number, title.trim() || String(number)]));
   }
 
   plan(items: readonly CourseItem[]): Map<string, string> {

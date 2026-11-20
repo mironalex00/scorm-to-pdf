@@ -81,7 +81,7 @@ export class CourseIndexParser {
       const descendants = [...sectionDescendants(element)];
       const title = this.titleOf(element, descendants);
       const existing = sectionsByNumber.get(number);
-      if (existing === undefined || (existing.title === "" && title !== "")) {
+      if (existing === undefined || (title !== "" && (existing.title === "" || element.hasClass("courseindex-section")))) {
         sectionsByNumber.set(number, { number, title });
       }
 
@@ -120,11 +120,12 @@ export class CourseIndexParser {
   }
 
   private titleOf(section: HtmlElement, descendants: readonly HtmlElement[]): string {
+    const byAttribute = descendants.find((child) => child.attr("data-for") === "section_title")?.text();
+    if (byAttribute) return byAttribute;
     const name = section.attr("data-sectionname")?.trim();
     if (name) return name;
-    const byAttribute = descendants.find((child) => child.attr("data-for") === "section_title");
     const byClass = descendants.find((child) => child.hasClass("courseindex-section-title"));
-    return (byAttribute ?? byClass)?.text() ?? "";
+    return byClass?.text() ?? "";
   }
 
   private activityLink(activity: HtmlElement): HtmlElement | undefined {

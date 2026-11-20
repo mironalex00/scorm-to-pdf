@@ -5,6 +5,14 @@ import { NamePlanner } from "../../src/application/NamePlanner.ts";
 import type { CourseItem } from "../../src/domain/catalog.ts";
 
 const planner = new NamePlanner({ namer: new FileNamer({ fallbackName: "archivo", maxNameBytes: 100 }) });
+
+it("planea carpetas separadas para títulos equivalentes y usa el número cuando falta el título", () => {
+  assert.deepEqual([...planner.sectionFolders([
+    { number: 1, title: "Curs / I" },
+    { number: 2, title: "curs : I" },
+    { number: 3, title: "" },
+  ])], [[1, "Curs _ I"], [2, "curs _ I (2)"], [3, "3"]]);
+});
 const item = (id: string, name: string, sectionNumber: number): CourseItem => ({ id, kind: "resource", name, url: "u", sectionNumber });
 
 describe("NamePlanner", () => {
