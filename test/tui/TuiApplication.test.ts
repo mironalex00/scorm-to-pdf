@@ -99,15 +99,17 @@ describe("TuiApplication · camino feliz", () => {
     assert.match(stdout.output, /0 archivos nuevos, 1 ya existían/);
   });
 
-  it("dibuja tres cuadros de despedida al terminar", async () => {
+  it("dibuja un gato grande y anima un guiño de un solo ojo", async () => {
     const { app, terminal } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")]);
     assert.equal(await app.run(), 0);
     assert.equal(terminal.closed, 1);
     const frames = terminal.frames.slice(-3).map((lines) => lines.join("\n"));
     assert.equal(frames.length, 3);
     assert.ok(frames.every((frame) => frame.startsWith("Mulțumesc!")));
-    assert.match(frames[0]!, /- -/);
-    assert.match(frames[2]!, /\\_\//);
+    assert.match(frames[0]!, /\(  o  \) +\(  o  \)/);
+    assert.match(frames[1]!, /\( _\._ \) +\(  o  \)/);
+    assert.match(frames[2]!, />---< +\(  o  \)/);
+    assert.ok(terminal.frames.at(-1)!.filter((line) => /[+|/'_.\\]/.test(line)).length >= 15);
   });
 
   it("permite continuar si uno de los cursos elegidos carece de materiales", async () => {
@@ -178,25 +180,29 @@ describe("TuiApplication · navegación", () => {
     assert.equal(calls[0]!.dest, "carpeta-actual/Alfa");
   });
 
-  it("tras confirmar una selección y cambiar de curso, los contenidos empiezan sin marcar", async () => {
+  it("recupera las marcas al volver a entrar en el mismo curso", async () => {
     const { app, terminal, calls } = make([
-      key("enter"), key("space"), key("enter"), // curso Alfa, marca A, pasa a confirmar
-      key("escape"), key("escape"), // vuelve a los contenidos (marcas conservadas) y de ahí a los cursos
-      key("enter"), key("enter"), // elige otra vez un curso y pulsa Enter sin marcar nada
-      key("ctrl-c"),
+      key("enter"), key("space"), key("enter"),
+      key("escape"), key("escape"),
+      key("enter"), key("enter"), key("enter"), key("enter"),
     ]);
-    assert.equal(await app.run(), 130);
-    assert.match(terminal.lastFrame, /Marca al menos un contenido/);
-    assert.deepEqual(calls, []);
+    assert.equal(await app.run(), 0);
+    assert.match(terminal.allFrames(), /\[x\] Tema A/);
+    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Alfa" }]);
   });
 
-  it("al elegir otro curso se parte sin marcas del anterior", async () => {
-    const { app, calls } = make(
-      [key("enter"), key("space"), key("escape"), key("down"), key("enter"), key("escape"), key("home"), key("enter"), key("down"), key("space"), key("enter"), key("enter"), key("enter")],
-      { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("z", "Z", 1)] } } },
-    );
+  it("guarda las marcas por curso al alternar entre dos cursos elegidos individualmente", async () => {
+    const { app, terminal, calls } = make([
+      key("enter"), key("space"), key("escape"),
+      key("down"), key("enter"), key("space"), key("escape"),
+      key("enter"), key("escape"),
+      key("down"), key("enter"), key("enter"), key("enter"), key("enter"),
+    ], { contents: { "1": alfa, "2": { sections: [{ number: 1, title: "S" }], items: [item("a", "Z", 1)] } } });
     assert.equal(await app.run(), 0);
-    assert.deepEqual(calls[0]!.items, ["b"]);
+    const beta = terminal.frames.filter((frame) => frame[0]?.startsWith("«Beta»"));
+    assert.match(beta[0]!.join("\n"), /\[ \] Z/);
+    assert.match(beta.at(-1)!.join("\n"), /\[x\] Z/);
+    assert.deepEqual(calls, [{ items: ["a"], dest: "carpeta-actual/Beta" }]);
   });
 });
 

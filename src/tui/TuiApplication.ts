@@ -34,10 +34,39 @@ type Destination = { kind: "cancelled" } | { kind: "back" } | { kind: "path"; pa
 
 const CANCELLED_EXIT_CODE = 130;
 const BAR_WIDTH = 30;
-const SMILE_FRAMES = [
-  ["  _____  ", " / - - \\ ", "|   .   |", " \\_____/ "],
-  ["  _____  ", " / o o \\ ", "|  ___  |", " \\_____/ "],
-  ["  _____  ", " / o o \\ ", "|  \\_/  |", " \\_____/ "],
+const CAT_EARS = [
+  "          /\\                        /\\",
+  "         /  \\__                  __/  \\",
+  "        / /\\   \\________________/   /\\ \\",
+  "       / /  '.                    .'  \\ \\",
+  "      | /     '.                .'     \\ |",
+  "      |/                                \\|",
+  "      /                                  \\",
+];
+const CAT_MUZZLE = [
+  "  ---+----             (__)            ----+---",
+  "   --+---              /  \\             ---+--",
+  "      \\          ._   /    \\   _.          /",
+  "       '.          '--'    '--'          .'",
+  "         '-._                         _.-'",
+  "             '-------._______.-------'",
+];
+const CAT_EYES = [
+  [
+    "     |        .-\"\"\"-.        .-\"\"\"-.      |",
+    "     |        (  o  )        (  o  )      |",
+    "     |         '-.-'    /\\    '-.-'       |",
+  ],
+  [
+    "     |        .-----.        .-\"\"\"-.      |",
+    "     |        ( _._ )        (  o  )      |",
+    "     |                  /\\    '-.-'       |",
+  ],
+  [
+    "     |        _     _        .-\"\"\"-.      |",
+    "     |         >---<         (  o  )      |",
+    "     |                  /\\    '-.-'       |",
+  ],
 ];
 
 /**
@@ -116,7 +145,6 @@ export class TuiApplication {
         }));
         if (result.kind !== "done") return { kind: "cancelled" };
         chosen = result.value;
-        if (chosen.length === 1) selections.clear();
         courseIndex = 0;
         step = "items";
       } else if (step === "items") {
@@ -315,17 +343,26 @@ export class TuiApplication {
   }
 
   private async farewell(): Promise<void> {
-    for (const [index, frame] of SMILE_FRAMES.entries()) {
+    for (const [index, eyes] of CAT_EYES.entries()) {
+      const frame = [...CAT_EARS, ...eyes, ...CAT_MUZZLE];
       const size = this.terminal.size();
-      const top = Math.max(0, Math.floor((this.layout.bodyHeight(size) - frame.length) / 2));
-      const indent = " ".repeat(Math.max(0, Math.floor((size.columns - frame[0]!.length - 1) / 2)));
+      const rows = this.layout.bodyHeight(size);
+      const columns = Math.max(2, size.columns - 1);
+      const width = Math.max(...frame.map((line) => line.length));
+      const top = Math.max(0, Math.floor((rows - frame.length) / 2));
+      const cropRow = Math.max(0, Math.floor((frame.length - rows) / 2));
+      const cropColumn = Math.max(0, Math.floor((width - columns) / 2));
+      const indent = " ".repeat(Math.max(0, Math.floor((columns - width) / 2)));
       this.terminal.render(this.layout.compose({
         title: this.messages.tui.farewell(),
-        body: [...Array<string>(top).fill(""), ...frame.map((line) => indent + line)],
+        body: [
+          ...Array<string>(top).fill(""),
+          ...frame.slice(cropRow, cropRow + rows).map((line) => indent + line.slice(cropColumn, cropColumn + columns)),
+        ],
         footer: "",
         size,
       }));
-      await setTimeout(index === SMILE_FRAMES.length - 1 ? 600 : 130);
+      await setTimeout(index === CAT_EYES.length - 1 ? 760 : 175);
     }
   }
 }
