@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { setTimeout } from "node:timers/promises";
 import { CliApplication } from "../../src/CliApplication.ts";
+import { asciiAnimations } from "../../src/extensions/ascii/generatedAnimations.ts";
 import { RawTerminal } from "../../src/tui/RawTerminal.ts";
 import type { KeyPress } from "../../src/tui/Terminal.ts";
 import { FakeMoodle } from "../support/FakeMoodle.ts";
@@ -118,7 +119,9 @@ describe("e2e · selector interactivo", () => {
     ]);
     assert.match(stdout.output, /Descargando 2\/2: Tema 1/);
     assert.equal(stdout.output.match(/Mulțumesc!/g)?.length, 9);
-    assert.match(stdout.output, /Mulțumesc![\s\S]*\.--------\)[\s\S]*Mulțumesc![\s\S]*\.---'[\s\S]*\x1b\[\?1049l✓ Descarga completada: 2 archivos nuevos/);
+    const farewell = stdout.output.slice(stdout.output.indexOf("Mulțumesc!"));
+    for (const frame of asciiAnimations.farewell.frames) assert.ok(farewell.includes(frame[13]!));
+    assert.match(farewell, /\x1b\[\?1049l✓ Descarga completada: 2 archivos nuevos/);
   });
 
   it("puede elegir solo una semana con a y descargarla", async () => {
@@ -140,7 +143,7 @@ describe("e2e · selector interactivo", () => {
     const moodle = await server({ failItems: ["531"] });
     const { code, terminal, stderr } = await run(moodle, [...chooseFirstCourseAndMarkAll, key("enter"), key("enter"), key("space")]);
     assert.equal(code, 1);
-    assert.match(terminal.allFrames(), /\|==\|/);
+    for (const frame of asciiAnimations.downloadFailure.frames) assert.ok(terminal.allFrames().includes(frame[15]!));
     assert.match(terminal.allFrames(), /Hubo errores en la descarga[\s\S]*Fallo en «Complementar»/);
     assert.match(stderr, /Fallo en «Complementar»[\s\S]*Descargados: 3 · Omitidos: 0 · Fallidos: 1[\s\S]*Traza guardada en/);
     assert.deepEqual(await pdfs(work), ["content/Algoritmi fundamentali/General/Programa/Programa.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Curs 5. Funcții/Curs 5. Funcții.pdf", "content/Algoritmi fundamentali/Săptămâna 1/Exerciții & teme/Exerciții & teme.pdf"]);
@@ -150,7 +153,8 @@ describe("e2e · selector interactivo", () => {
     const { code, terminal, stderr } = await run(await server(), [], { MOODLE_COOKIE: "caducada-000000" });
     assert.equal(code, 3);
     assert.match(stderr, /Moodle no reconoce la sesión/);
-    assert.match(terminal.allFrames(), /No se pudo continuar[\s\S]*\(o\)/);
+    assert.match(terminal.allFrames(), /No se pudo continuar/);
+    for (const frame of asciiAnimations.unexpectedFailure.frames) assert.ok(terminal.allFrames().includes(frame[14]!));
     assert.deepEqual([terminal.opened, terminal.closed], [1, 1]);
   });
 

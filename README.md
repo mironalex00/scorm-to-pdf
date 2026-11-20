@@ -1,6 +1,6 @@
 # scorm-to-pdf
 
-Descarga el material de tus cursos de Moodle ordenado por semanas. Los archivos directos se guardan tal cual; los SCORM de diapositivas se convierten a PDF. Sin dependencias en ejecución.
+Descarga el material de tus cursos de Moodle ordenado por semanas. Los archivos directos se guardan tal cual; los SCORM de diapositivas se convierten a PDF. La descarga de Moodle y sus animaciones funcionan con Node o Bun.
 
 ```sh
 export MOODLE_COOKIE='...'      # o en un archivo .env (Bun lo carga solo); si falta, el selector la pide
@@ -19,6 +19,7 @@ Sin Bun: `node src/main.ts` (Node 22.18 o posterior; en 22.6–22.17 añade `--e
 | `get <curso> --all \| --week 1,3 \| --item 501,512 [--dest carpeta]` | Descarga una selección |
 | `<id \| URL>` | Convierte un SCORM de diapositivas en PDF (la orden original, intacta) |
 | `diagnose` | Recorre la cadena completa contra tu Moodle y guarda una traza |
+| `ascii <entrada>` | Convierte imágenes, GIF y vídeos a ASCII |
 
 Opciones generales: `--platform`, `--base-url`, `--lang`, `-c/--concurrency`, `--trace`, `--trace-dir`, `-q`, `-h`, `-v`. `--help` muestra todo. Códigos de salida: `0` éxito, `1` error o descargas fallidas, `2` uso incorrecto, `3` sesión no válida, `130` cancelado.
 
@@ -28,7 +29,7 @@ Opciones generales: `--platform`, `--base-url`, `--lang`, `-c/--concurrency`, `-
 
 ## Motor ASCII
 
-La [extensión ASCII](src/extensions/ascii/README.md) convierte imágenes, GIF y vídeos en texto, animaciones para terminal, HTML, JSON, imágenes o vídeo. La conversión usa FFmpeg y FFprobe. La reproducción de los cuadros de despedida y de error del selector usa el mismo ajuste de pantalla.
+Ejecuta `node src/main.ts ascii foto.png --invert -w 48` o consulta `ascii --help`. La [extensión ASCII](src/extensions/ascii/README.md) admite texto, reproducción en terminal, HTML, JSON, imágenes y vídeo. Prepara FFmpeg y FFprobe en un directorio temporal por ejecución. La TUI reproduce los cuadros generados desde los PNG de referencia con ese mismo motor.
 
 ## Cuando algo falla (trazabilidad)
 
@@ -42,7 +43,7 @@ Antes de enviar una traza, revísala: se eliminan la cookie, el sesskey, tokens 
 
 ## Plataformas y extensiones
 
-Todo lo que se usa (`my/courses.php`, `lib/ajax/service.php`, el índice del curso, `mod/resource`, `mod/scorm`, `loadSCO.php`) es Moodle estándar. Por eso solo hay un adaptador (`src/platforms/moodle`) y una **extensión** es únicamente configuración, identificada con un nombre de paquete en dominio inverso y ubicada en la ruta equivalente: `ro.utcluj.kb` → `src/extensions/ro/utcluj/kb/`. El registro es una lista estática; nada se carga en tiempo de ejecución.
+Todo lo que se usa (`my/courses.php`, `lib/ajax/service.php`, el índice del curso, `mod/resource`, `mod/scorm`, `loadSCO.php`) es Moodle estándar. Por eso solo hay un adaptador (`src/platforms/moodle`) y cada **extensión de Moodle** es configuración, identificada con un nombre de paquete en dominio inverso y ubicada en la ruta equivalente: `ro.utcluj.kb` → `src/extensions/ro/utcluj/kb/`. El registro es una lista estática; nada se carga en tiempo de ejecución.
 
 `--platform ro.utcluj.kb` elige una extensión; `--platform https://campus.example.org` o `--base-url` eligen por host y, si no hay extensión, usan Moodle estándar. `MOODLE_BASE_URL` sigue funcionando como alias. Equivalentes de entorno: `SCORM_PLATFORM`, `SCORM_LANG`, `SCORM_TRACE=1`.
 
@@ -69,7 +70,7 @@ El catálogo se guarda **comprimido (gzip) y solo en RAM**; cada curso se pide a
 
 ## Desarrollo
 
-`package.json` solo sirve para desarrollar (TypeScript y los tipos de Node); en ejecución no hay dependencias y puede borrarse.
+Usa `npm ci` o `bun install` para instalar las herramientas de desarrollo y el descompresor que usa `ascii`. `npm run ascii:prepare` prepara la caché de los códecs y `npm run ascii:art` regenera los cuadros de la TUI.
 
 ```sh
 npm install

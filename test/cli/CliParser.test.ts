@@ -174,6 +174,36 @@ describe("CliParser · errores de uso", () => {
 });
 
 describe("CliParser · órdenes", () => {
+  it("ascii usa el parser común, incluidos los alias antes de la orden", () => {
+    const command = parseKind(
+      ["-w", "40.0", "-o", "out.json", "ascii", "input.png", "--bg", "--tone=0", "--fps", "12.5", "--chars=", "-q"],
+      "ascii",
+      { MOODLE_BASE_URL: "incorrecta", SCORM_PLATFORM: "inexistente" },
+    );
+    assert.equal(command.request.kind, "convert");
+    assert.equal(command.global.quiet, true);
+    if (command.request.kind !== "convert") assert.fail("se esperaba una conversión");
+    const { input, options } = command.request;
+    assert.deepEqual([input, options.cols, options.out, options.bg, options.tone, options.fps, options.chars],
+      ["input.png", 40, "out.json", true, 0, 12.5, ""]);
+    assert.equal(parseKind(["ascii", "--prepare"], "ascii").request.kind, "prepare");
+    assert.match(parseKind(["ascii", "--help"], "help").text, /ascii <entrada>.*--prepare/s);
+  });
+
+  it("ascii valida sus argumentos y usa los mismos diagnósticos de opciones", () => {
+    assertUsageError(["ascii"], /Falta la imagen/);
+    assertUsageError(["ascii", "a.png", "b.png"], /una sola/);
+    assertUsageError(["ascii", "--prepare", "a.png"], /--prepare se usa sin entrada/);
+    assertUsageError(["ascii", "--prepare", "--loop"], /--prepare se usa sin entrada/);
+    assertUsageError(["ascii", "a.png", "--gamma", "Infinity"], /--gamma/);
+    assertUsageError(["ascii", "a.png", "--fps", "61"], /--fps/);
+    assertUsageError(["ascii", "a.png", "--tone=-1"], /--tone/);
+    assertUsageError(["ascii", "a.png", "--cols"], /--cols requiere un valor/);
+    assertUsageError(["ascii", "a.png", "--cols=1.5"], /entero entre 1 y 500/);
+    assertUsageError(["ascii", "a.png", "--cols=30", "-w", "40"], /--cols se indicó más de una vez/);
+    assertUsageError(["ascii", "a.png", "--colx=30"], /¿Quisiste decir --cols/);
+  });
+
   it("sin argumentos o solo con opciones generales abre el selector interactivo", () => {
     assert.equal(parseKind([], "tui").global.quiet, false);
     assert.equal(parseKind(["-q"], "tui").global.quiet, true);

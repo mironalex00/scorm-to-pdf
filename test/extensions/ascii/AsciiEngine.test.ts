@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AsciiEngine, CELL_HEIGHT, CELL_WIDTH } from "../../../src/extensions/ascii/AsciiEngine.ts";
-import { cliArgs } from "../../../src/extensions/ascii/main.ts";
 import { fitAsciiFrame } from "../../../src/extensions/ascii/viewport.ts";
 
 const rgb = (value: number) => Buffer.alloc(CELL_WIDTH * CELL_HEIGHT * 3, value);
@@ -36,15 +35,6 @@ test("valida dimensiones, cuadros RGB y parámetros de conversión", () => {
   assert.throws(() => engine.frame(rgb(0), 2, 1), /RGB24/);
   assert.throws(() => engine.raster(engine.frame(rgb(0), 1, 1), 1.5), /entero/);
   assert.match(engine.html([engine.frame(rgb(255), 1, 1)]), /background:#fff/);
-});
-
-test("el CLI conserva alias y distingue un peso de tono cero de una opción inválida", () => {
-  const parsed = cliArgs(["input.png", "-w", "40", "-o", "out.json", "--bg", "--tone", "0"]);
-  assert.equal(parsed.input, "input.png");
-  assert.deepEqual([parsed.options.cols, parsed.options.out, parsed.options.bg, parsed.options.tone], [40, "out.json", true, 0]);
-  assert.throws(() => cliArgs(["a.png", "b.png"]), /un solo archivo/);
-  assert.throws(() => cliArgs(["a.png", "--gamma", "Infinity"]), /Valor inválido/);
-  assert.throws(() => cliArgs(["a.png", "--cols"]), /argument/);
 });
 
 test("centra y recorta cuadros ASCII al tamaño de un visor", () => {

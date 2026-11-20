@@ -7,6 +7,8 @@ import type { ItemOutcome } from "../../src/application/ItemDownloader.ts";
 import { ReportPrinter } from "../../src/application/ReportPrinter.ts";
 import { AuthenticationError, DownloadError } from "../../src/domain/errors.ts";
 import type { CourseContents, CourseItem } from "../../src/domain/catalog.ts";
+import { asciiAnimations } from "../../src/extensions/ascii/generatedAnimations.ts";
+import { fitAsciiFrame } from "../../src/extensions/ascii/viewport.ts";
 import { es } from "../../src/i18n/es.ts";
 import { CompressedStore } from "../../src/store/CompressedStore.ts";
 import { NullTracer } from "../../src/tracing/NullTracer.ts";
@@ -104,9 +106,13 @@ describe("TuiApplication · camino feliz", () => {
     assert.equal(await app.run(), 0);
     const frames = terminal.frames.filter((frame) => frame[0] === "Mulțumesc!");
     assert.equal(frames.length, 9);
-    assert.match(frames[0]!.join("\n"), /\.--------\)/);
-    assert.match(frames[1]!.join("\n"), /\.---'/);
-    assert.match(frames[2]!.join("\n"), /\.___|\._ ________/);
+    const { columns, rows } = terminal.size();
+    const art = asciiAnimations.farewell.frames;
+    assert.equal(new Set(art.map((frame) => frame.join("\n"))).size, 3);
+    for (const [index, frame] of art.entries()) {
+      const fitted = fitAsciiFrame(frame, columns - 1, rows - 5);
+      assert.deepEqual(frames[index]!.slice(3, 3 + fitted.length), fitted);
+    }
     assert.deepEqual(frames.slice(0, 3), frames.slice(6, 9));
   });
 

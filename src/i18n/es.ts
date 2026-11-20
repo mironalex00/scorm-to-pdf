@@ -10,7 +10,7 @@ export const es: Messages = {
   },
 
   options: {
-    out: "Ruta del PDF. Por defecto se deduce del título del curso.",
+    out: "Archivo de salida. Para SCORM, el PDF se nombra automáticamente si se omite.",
     "out-dir": "Carpeta del PDF con nombre automático (por defecto: la actual).",
     concurrency: "Descargas en paralelo, de 1 a 32 (por defecto: 6).",
     "base-url": "Raíz de Moodle; selecciona la extensión por su host.",
@@ -28,10 +28,24 @@ export const es: Messages = {
     quiet: "No mostrar el progreso.",
     help: "Mostrar esta ayuda.",
     version: "Mostrar la versión.",
+    prepare: "Descarga y verifica los archivos comprimidos del conversor para usarlo sin conexión.",
+    cols: "Columnas del arte ASCII, de 1 a 500.",
+    fps: "Cuadros por segundo del arte ASCII, hasta 60.",
+    scale: "Escala de píxel para imagen y vídeo, de 1 a 8.",
+    gamma: "Ajuste de brillo (por defecto: 1).",
+    tone: "Peso del tono frente a la forma (por defecto: 1).",
+    aspect: "Proporción ancho/alto de la celda del glifo.",
+    chars: "Conjunto de caracteres ASCII imprimibles para el dibujo.",
+    "max-frames": "Máximo de cuadros que se procesarán para la animación.",
+    color: "Usa color de primer plano por celda.",
+    bg: "Usa color de primer plano y de fondo por celda.",
+    invert: "Invierte el brillo para dibujar sobre fondo claro.",
+    loop: "Repite la animación mientras se reproduce en terminal.",
+    mute: "Omite el audio al exportar vídeo ASCII.",
   },
 
   help: {
-    values: { file: "archivo", folder: "carpeta", path: "ruta", list: "lista", number: "n", url: "url", code: "código", platform: "id|url" },
+    values: { file: "archivo", folder: "carpeta", path: "ruta", list: "lista", number: "n", text: "texto", url: "url", code: "código", platform: "id|url" },
     intro: (p) => [
       `Uso: ${p.program} [orden] [opciones]`,
       "",
@@ -47,11 +61,21 @@ export const es: Messages = {
       `  ${p.program} items <curso>         Lista las semanas y los contenidos de un curso`,
       `  ${p.program} get <curso>           Descarga contenidos de un curso`,
       `  ${p.program} diagnose              Comprueba cada paso contra tu Moodle y guarda una traza`,
+      `  ${p.program} ascii <entrada>       Convierte imágenes y vídeos a ASCII`,
     ],
     globalHeading: () => "Opciones generales:",
     scormHeading: () => "Con <id | URL>:",
     listHeading: () => "Con courses e items:",
     getHeading: () => "Con get (usa --all o elige con --week / --item):",
+    asciiHeading: () => "Con ascii:",
+    asciiIntro: (p) => [
+      `Uso: ${p.program} ascii <entrada> [opciones]`,
+      `     ${p.program} ascii --prepare`,
+      "Lee JPG/JPEG, PNG, WebP, GIF, MP4 y WebM, desde un archivo o una URL HTTP(S).",
+      "Exporta .txt, .ansi, .json, .html, .png, .gif, .mp4, .webm, .mov, .mkv o .avi.",
+      "Sin --out, dibuja en la terminal o escribe el primer cuadro si la salida se redirige.",
+    ],
+    asciiEnvironment: () => "SCORM_ASCII_CACHE elige dónde guardar los archivos comprimidos del conversor.",
     environment: () => [
       "Entorno:",
       "  MOODLE_COOKIE    Cookie de sesión de Moodle (obligatoria). Acepta el valor de la",
@@ -108,6 +132,18 @@ export const es: Messages = {
       "El selector interactivo necesita una terminal. Usa una orden (courses, items, get) o un ID de SCORM; --help muestra el uso.",
     courseNotFound: (p) => `No se encontró ningún curso que coincida con «${p.query}».`,
     courseAmbiguous: (p) => `«${p.query}» coincide con varios cursos; usa su id: ${p.matches}`,
+    asciiMissingInput: () => "Falta la imagen o el vídeo de entrada de ascii.",
+    asciiTooManyInputs: () => "ascii acepta una sola imagen o vídeo de entrada.",
+    asciiPrepareOnly: () => "--prepare se usa sin entrada ni opciones de conversión.",
+    asciiInvalidNumber: (p) => `Valor fuera del rango de --${p.name}: «${p.raw}».`,
+  },
+
+  ascii: {
+    unsupportedPlatform: (p) => `El conversor ASCII no tiene una compilación para ${p.target}. Está disponible en macOS y Linux, x64 y arm64.`,
+    preparationFailed: (p) => `No se pudo descargar ${p.tool} (HTTP ${p.status}).`,
+    invalidArchive: (p) => `El archivo comprimido de ${p.tool} no coincide con la compilación verificada.`,
+    missingDependency: () => "Falta el descompresor de ASCII. Instala las dependencias del proyecto con npm ci o bun install.",
+    prepared: () => "Conversor ASCII preparado para funcionar sin conexión.",
   },
 
   commands: {

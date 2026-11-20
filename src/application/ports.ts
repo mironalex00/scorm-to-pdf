@@ -8,6 +8,8 @@ export interface HttpRequest {
   readonly maxBytes: number;
   /** Cuerpo de la petición (solo POST). */
   readonly body?: string;
+  /** Cancela la petición y la lectura del cuerpo desde la operación que la posee. */
+  readonly signal?: AbortSignal;
 }
 
 export interface HttpResponse {

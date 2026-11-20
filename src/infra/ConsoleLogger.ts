@@ -5,6 +5,7 @@ export interface OutputStream {
   write(text: string): unknown;
   readonly isTTY?: boolean;
   readonly columns?: number;
+  readonly rows?: number;
 }
 
 const CLEAR_LINE = "\r\x1b[2K";

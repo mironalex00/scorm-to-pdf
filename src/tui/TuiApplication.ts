@@ -7,12 +7,13 @@ import type { ProgressUpdate } from "../application/ports.ts";
 import type { ReportPrinter } from "../application/ReportPrinter.ts";
 import type { CourseContents, CourseItem, CourseSummary, Section } from "../domain/catalog.ts";
 import { errorMessage } from "../domain/errors.ts";
+import { asciiAnimations } from "../extensions/ascii/generatedAnimations.ts";
+import type { AsciiClip } from "../extensions/ascii/index.ts";
 import { fitAsciiFrame } from "../extensions/ascii/viewport.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { OutputStream } from "../infra/ConsoleLogger.ts";
 import type { FrameLayout } from "./FrameLayout.ts";
 import { ScreenRunner } from "./ScreenRunner.ts";
-import { BEAR_HOOP, HAMMER_POINT, STARTLED_BOY } from "./animationFrames.ts";
 import { CourseSelectionScreen } from "./screens/CourseSelectionScreen.ts";
 import { ItemSelectionScreen } from "./screens/ItemSelectionScreen.ts";
 import { ListScreen } from "./screens/ListScreen.ts";
@@ -87,10 +88,10 @@ export class TuiApplication {
     try {
       outcome = await this.flow();
       if (outcome.kind === "finished" && outcome.report.failed === 0 && !outcome.report.aborted) {
-        await this.animate(this.messages.tui.farewell(), BEAR_HOOP, 3);
+        await this.animate(this.messages.tui.farewell(), asciiAnimations.farewell, 3);
       }
     } catch (error) {
-      await this.animate(this.messages.tui.unexpectedTitle(), STARTLED_BOY);
+      await this.animate(this.messages.tui.unexpectedTitle(), asciiAnimations.unexpectedFailure);
       throw error;
     } finally {
       this.terminal.close();
@@ -259,7 +260,7 @@ export class TuiApplication {
     }
     const report = { outcomes, downloaded, skipped, failed, aborted };
     if (report.failed > 0 || report.aborted) {
-      await this.animate(this.messages.tui.errorsTitle(), HAMMER_POINT);
+      await this.animate(this.messages.tui.errorsTitle(), asciiAnimations.downloadFailure);
       await this.runner.run(this.errorsScreen(report));
     }
     return { kind: "finished", report, dest: contentRoot };
@@ -323,8 +324,8 @@ export class TuiApplication {
     return this.printer.exitCode(report);
   }
 
-  private async animate(title: string, frames: readonly (readonly string[])[], cycles = 1): Promise<void> {
-    const timeline = Array.from({ length: cycles }, () => frames).flat();
+  private async animate(title: string, clip: AsciiClip, cycles = 1): Promise<void> {
+    const timeline = Array.from({ length: cycles }, () => clip.frames).flat();
     for (const [index, frame] of timeline.entries()) {
       const size = this.terminal.size();
       this.terminal.render(this.layout.compose({
@@ -333,7 +334,7 @@ export class TuiApplication {
         footer: "",
         size,
       }));
-      await setTimeout(index === timeline.length - 1 ? 320 : 145);
+      await setTimeout(index === timeline.length - 1 ? 320 : 1000 / clip.fps);
     }
   }
 }

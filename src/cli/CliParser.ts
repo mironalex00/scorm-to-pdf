@@ -1,10 +1,10 @@
 import { UsageError } from "../domain/errors.ts";
 import type { Messages } from "../i18n/Messages.ts";
-import type { CliCommand, GlobalOptions, ScormOptions } from "./commands.ts";
+import type { CliCommand, CommonOptions, GlobalOptions, ScormOptions } from "./commands.ts";
 import type { HelpFormatter } from "./HelpFormatter.ts";
 import { OptionCollector } from "./OptionCollector.ts";
 import type { CollectedOptions } from "./OptionCollector.ts";
-import { CLI_DEFAULTS, COMMAND_NAMES, COMMAND_OPTIONS, GLOBAL_OPTIONS } from "./optionSpecs.ts";
+import { ASCII_GLOBAL_OPTIONS, ASCII_OPTIONS, CLI_DEFAULTS, COMMAND_NAMES, COMMAND_OPTIONS, GLOBAL_OPTIONS } from "./optionSpecs.ts";
 import type { CommandName, OptionSpec } from "./optionSpecs.ts";
 
 interface TargetHints {
@@ -18,11 +18,14 @@ const MAX_SCORM_ID = 2_147_483_647;
 const LOCAL_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const PLUGINFILE_PATH = /^(.*)\/pluginfile\.php\/(\d+)\/mod_scorm\/content\/(\d+)\/(.+)$/;
 
-/** Para elegir la orden basta con saber qué opciones consumen un valor; sin formas cortas, que chocan. */
+/** Para elegir la orden basta con saber qué opciones consumen un valor. */
 const PEEK_SPECS: readonly OptionSpec[] = [
   ...GLOBAL_OPTIONS,
-  ...Object.values(COMMAND_OPTIONS).flatMap((specs) => specs.map((spec): OptionSpec => ({ name: spec.name, kind: spec.kind }))),
-].filter((spec, index, all) => all.findIndex((other) => other.name === spec.name) === index);
+  ...Object.values(COMMAND_OPTIONS).flat(),
+].filter((spec, index, all) => all.findIndex((other) => other.name === spec.name) === index)
+  .map((spec, index, all) => spec.short && all.findIndex((other) => other.short === spec.short) !== index
+    ? { ...spec, short: undefined }
+    : spec);
 
 /** Convierte argv en una orden validada. Nunca toca el proceso ni el sistema de archivos. */
 export class CliParser {
@@ -47,8 +50,9 @@ export class CliParser {
 
   parse(argv: readonly string[]): CliCommand {
     const name = this.detectCommand(argv);
-    const collected = this.collector.collect(argv, [...GLOBAL_OPTIONS, ...COMMAND_OPTIONS[name]]);
-    if (collected.flags.has("help")) return { kind: "help", text: this.help.format() };
+    const globals = name === "ascii" ? ASCII_GLOBAL_OPTIONS : GLOBAL_OPTIONS;
+    const collected = this.collector.collect(argv, [...globals, ...COMMAND_OPTIONS[name]]);
+    if (collected.flags.has("help")) return { kind: "help", text: name === "ascii" ? this.help.formatAscii() : this.help.format() };
     if (collected.flags.has("version")) {
       return { kind: "version", text: `${this.help.programName} ${this.version}\n` };
     }
@@ -57,6 +61,8 @@ export class CliParser {
     switch (name) {
       case "scorm":
         return this.buildScorm(collected, positionals);
+      case "ascii":
+        return this.buildAscii(collected, positionals);
       case "courses":
         this.expectNone(name, positionals);
         return { kind: "courses", global: this.buildGlobal(collected), json: collected.flags.has("json") };
@@ -94,11 +100,58 @@ export class CliParser {
     return {
       platform: strings.get("platform") ?? this.env.SCORM_PLATFORM,
       baseUrl: this.resolveBaseUrl(strings.get("base-url"), hintBaseUrl),
-      lang: strings.get("lang"),
       concurrency: this.resolveConcurrency(strings.get("concurrency")),
+      ...this.buildCommon(collected),
+    };
+  }
+
+  private buildCommon(collected: CollectedOptions): CommonOptions {
+    return {
+      lang: collected.strings.get("lang"),
       trace: collected.flags.has("trace") || this.env.SCORM_TRACE === "1",
-      traceDir: strings.get("trace-dir"),
+      traceDir: collected.strings.get("trace-dir"),
       quiet: collected.flags.has("quiet"),
+    };
+  }
+
+  private buildAscii(collected: CollectedOptions, positionals: readonly string[]): CliCommand {
+    const { flags, strings } = collected;
+    const global = this.buildCommon(collected);
+    if (flags.has("prepare")) {
+      if (positionals.length || ASCII_OPTIONS.some(({ name }) => name !== "prepare" && (strings.has(name) || flags.has(name)))) {
+        throw new UsageError(this.messages.cli.asciiPrepareOnly());
+      }
+      return { kind: "ascii", global, request: { kind: "prepare" } };
+    }
+    if (positionals.length === 0 || !positionals[0]!.trim()) throw new UsageError(this.messages.cli.asciiMissingInput());
+    if (positionals.length > 1) throw new UsageError(this.messages.cli.asciiTooManyInputs());
+
+    const integer = (name: string, max: number) => {
+      const raw = strings.get(name);
+      return raw === undefined ? undefined : this.parseInteger("--" + name, raw, 1, max, true);
+    };
+    const decimal = (name: string, minimum: "positive" | "nonnegative", maximum = Infinity) => {
+      const raw = strings.get(name);
+      if (raw === undefined) return undefined;
+      const value = Number(raw);
+      if (!raw.trim() || !Number.isFinite(value) || value > maximum || (minimum === "positive" ? value <= 0 : value < 0)) {
+        throw new UsageError(this.messages.cli.asciiInvalidNumber({ name, raw }));
+      }
+      return value;
+    };
+    return {
+      kind: "ascii", global,
+      request: {
+        kind: "convert", input: positionals[0]!,
+        options: {
+          out: strings.get("out"), cols: integer("cols", 500), scale: integer("scale", 8),
+          maxFrames: integer("max-frames", 10_000), fps: decimal("fps", "positive", 60),
+          gamma: decimal("gamma", "positive"), tone: decimal("tone", "nonnegative"),
+          aspect: decimal("aspect", "positive"), chars: strings.get("chars"),
+          bg: flags.has("bg"), color: flags.has("color"), invert: flags.has("invert"),
+          loop: flags.has("loop"), mute: flags.has("mute"),
+        },
+      },
     };
   }
 
@@ -173,9 +226,9 @@ export class CliParser {
     return this.parseInteger(this.messages.cli.scormIdLabel(), raw, 1, MAX_SCORM_ID);
   }
 
-  private parseInteger(label: string, raw: string, min: number, max: number): number {
-    const value = /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
-    if (!(value >= min && value <= max)) {
+  private parseInteger(label: string, raw: string, min: number, max: number, allowNumberSyntax = false): number {
+    const value = allowNumberSyntax || /^\d+$/.test(raw) ? Number(raw) : Number.NaN;
+    if (!Number.isSafeInteger(value) || value < min || value > max) {
       throw new UsageError(this.messages.cli.integerRange({ label, min: String(min), max: String(max), raw }));
     }
     return value;

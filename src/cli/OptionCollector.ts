@@ -63,7 +63,7 @@ export class OptionCollector {
 
     const value = token.value;
     const looksLikeAnotherOption = token.inlineValue === false && value?.startsWith("-");
-    if (value === undefined || value === "" || looksLikeAnotherOption) {
+    if (value === undefined || (value === "" && !spec.allowEmpty) || looksLikeAnotherOption) {
       throw new UsageError(this.messages.cli.optionNeedsValue({ name: spec.name }));
     }
     into.strings.set(spec.name, value);
