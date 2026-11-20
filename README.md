@@ -22,7 +22,7 @@ Sin Bun: `node src/main.ts` (Node 22.18 o posterior; en 22.6–22.17 añade `--e
 
 Opciones generales: `--platform`, `--base-url`, `--lang`, `-c/--concurrency`, `--trace`, `--trace-dir`, `-q`, `-h`, `-v`. `--help` muestra todo. Códigos de salida: `0` éxito, `1` error o descargas fallidas, `2` uso incorrecto, `3` sesión no válida, `130` cancelado.
 
-**Selector:** `↑↓` mueve el cursor, `Espacio` marca cursos o contenidos, `A` marca todo y `Enter` continúa. Si no has marcado ningún curso, `Enter` abre el que tiene el cursor. En los contenidos, `a` marca una sección. `Esc` vuelve un paso y conserva lo marcado al retroceder entre cursos. `Ctrl+C` cancela. Al completar la descarga, una pantalla de despedida muestra un agradecimiento en rumano y una sonrisa animada antes de devolver el control a la terminal.
+**Selector:** `↑↓` mueve el cursor, `Espacio` marca cursos o contenidos, `A` marca todo y `Enter` continúa. Si no has marcado ningún curso, `Enter` abre el que tiene el cursor. En los contenidos, `a` marca una sección. `Esc` vuelve un paso y conserva las marcas de cada curso durante la sesión, incluso si vuelves a la lista y entras en otro. `Ctrl+C` cancela. Al completar la descarga, una pantalla de despedida muestra un agradecimiento en rumano y un gato animado que guiña un ojo antes de devolver el control a la terminal.
 
 **Destino:** el selector guarda en `<destino>/<curso>/<título de sección>/<archivo>`, incluso si eliges un solo curso. `get` guarda en `<destino>/<título de sección>/<archivo>`. Cuando una sección carece de título, se usa su número. Si dos nombres de carpeta coinciden después de quitar caracteres incompatibles, se distinguen con sufijos como `(2)`. Si el destino ya contiene un archivo, se omite.
 

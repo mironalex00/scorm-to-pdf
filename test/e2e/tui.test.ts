@@ -99,6 +99,14 @@ describe("e2e · selector interactivo", () => {
 
     try {
       await screen("Tus cursos");
+      await type("\r", "[ ] Programa");
+      await type(" ", "[x] Programa");
+      await type("\x1b", "Tus cursos");
+      await type("\r", "[x] Programa");
+      await type("\x1b", "Tus cursos");
+      await type("\x1b[B\r", "[ ] Tema 1");
+      await type(" ", "[x] Tema 1");
+      await type("\x1b", "Tus cursos");
       await type(" ", "Cursos marcados: 1");
       await type("\x1b[B ", "Cursos marcados: 2");
       await type(" ", "Cursos marcados: 1");
@@ -106,9 +114,7 @@ describe("e2e · selector interactivo", () => {
       await type("A", "Cursos marcados: 0");
       await type("A", "Cursos marcados: 2");
       await type("\r", "Curso 1 de 2");
-      await type(" ", "[x] Programa");
-      await type("\r", "Curso 2 de 2");
-      await type(" ", "[x] Tema 1");
+      await type("\r", "[x] Tema 1");
       await type("\x1b", "Curso 1 de 2");
       await type("\r", "[x] Tema 1");
       await type("\r", "Confirmar la descarga de 2 contenidos");
@@ -124,7 +130,7 @@ describe("e2e · selector interactivo", () => {
       "Structuri de date/Tema/Tema 1.pdf",
     ]);
     assert.match(stdout.output, /Descargando 2\/2: Tema 1/);
-    assert.match(stdout.output, /Mulțumesc![\s\S]*- -[\s\S]*Mulțumesc![\s\S]*___[\s\S]*Mulțumesc![\s\S]*\\_\/[\s\S]*\x1b\[\?1049l✓ Descarga completada: 2 archivos nuevos/);
+    assert.match(stdout.output, /Mulțumesc![\s\S]*\(  o  \) +\(  o  \)[\s\S]*Mulțumesc![\s\S]*\( _\._ \)[\s\S]*Mulțumesc![\s\S]*>---< +\(  o  \)[\s\S]*\x1b\[\?1049l✓ Descarga completada: 2 archivos nuevos/);
   });
 
   it("puede elegir solo una semana con a y descargarla", async () => {
