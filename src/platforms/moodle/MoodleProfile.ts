@@ -1,8 +1,8 @@
-/** Todo lo que varía de una instalación de Moodle a otra y no es código. */
+/** Configuration that varies across Moodle installations. */
 export interface MoodleProfile {
   readonly id: string;
   readonly baseUrl: URL;
-  /** Rutas candidatas del contenido de un curso, con `{courseId}`; se prueban en orden. */
+  /** Course paths tried in order with the course ID substituted. */
   readonly contentsPaths: readonly string[];
   readonly maxFileBytes: number;
 }
