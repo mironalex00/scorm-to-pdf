@@ -1,3 +1,4 @@
+import { parseMoodleBaseUrl } from "../application/MoodleUrl.ts";
 import { UsageError } from "../domain/errors.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { Extension } from "./Extension.ts";
@@ -9,10 +10,7 @@ export interface ResolvedPlatform {
   readonly baseUrl: URL;
 }
 
-/**
- * Elige la extensión a usar. El registro es una lista estática declarada en la raíz de composición:
- * nada se descubre ni se carga en tiempo de ejecución. Una URL de un host sin extensión usa Moodle estándar.
- */
+/** Matches a configured Moodle extension by ID or host and falls back to standard Moodle. */
 export class ExtensionRegistry {
   private readonly extensions: readonly Extension[];
   private readonly defaultId: string;
@@ -27,7 +25,7 @@ export class ExtensionRegistry {
   resolve(input: { spec: string | undefined; baseUrl: URL | undefined }): ResolvedPlatform {
     const { spec, baseUrl } = input;
     if (spec !== undefined) {
-      if (/^https?:\/\//i.test(spec)) return this.byHost(this.parseUrl(spec));
+      if (/^[a-z][\w+.-]*:\/\//i.test(spec)) return this.byHost(parseMoodleBaseUrl(spec, "--platform", this.messages));
       const known = this.extensions.find((extension) => extension.id === spec);
       if (!known) throw this.unknown(spec);
       return { extension: known, baseUrl: baseUrl ?? new URL(known.baseUrl) };
@@ -45,15 +43,7 @@ export class ExtensionRegistry {
   }
 
   private generic(url: URL): Extension {
-    return { id: GENERIC_ID, baseUrl: url.href, contentsPaths: ["course/view.php?id={courseId}"], defaultLocale: "es" };
-  }
-
-  private parseUrl(spec: string): URL {
-    try {
-      return new URL(spec);
-    } catch {
-      throw this.unknown(spec);
-    }
+    return { id: GENERIC_ID, baseUrl: url.href, contentsPaths: ["course/view.php?id={courseId}"], defaultLocale: "en" };
   }
 
   private unknown(spec: string): UsageError {

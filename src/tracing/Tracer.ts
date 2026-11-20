@@ -3,7 +3,7 @@ export type TraceLevel = "debug" | "info" | "warn" | "error";
 export interface SerializedError {
   readonly name: string;
   readonly message: string;
-  /** «Nombre: mensaje» de cada error de la cadena de causas, del más externo al más interno. */
+  /** Error names and messages from the outermost error to the root cause. */
   readonly chain: readonly string[];
   readonly stack?: string;
 }
@@ -13,9 +13,9 @@ export interface TraceEvent {
   readonly seq: number;
   readonly run: string;
   readonly level: TraceLevel;
-  /** Dónde: componente y operación, p. ej. «moodle.http». */
+  /** Component that emitted the event. */
   readonly scope: string;
-  /** Qué ocurrió, p. ej. «response» o «load.fail». */
+  /** Event name within the component. */
   readonly name: string;
   readonly ms?: number;
   readonly ctx?: Readonly<Record<string, unknown>>;
@@ -23,27 +23,24 @@ export interface TraceEvent {
   readonly error?: SerializedError;
 }
 
-/** Destino de la traza: archivos en producción, memoria en las pruebas. */
+/** Trace output interface used by file and in-memory sinks. */
 export interface TraceSink {
   write(line: string): void;
-  snapshot(name: string, content: string): void;
-  location(): string;
+  snapshot(name: string, content: string): boolean | void;
+  location(): string | undefined;
 }
 
-/**
- * Observabilidad: cuándo (marca de tiempo y duración), dónde (ámbito) y cómo (datos, forma de las
- * respuestas y cadena de causas) falla algo. Nunca debe alterar el comportamiento de la aplicación.
- */
+/** Records timings, response shapes, and error causes without interrupting command execution. */
 export interface Tracer {
   event(level: TraceLevel, scope: string, name: string, data?: Record<string, unknown>): void;
   span<T>(scope: string, name: string, data: Record<string, unknown>, work: () => Promise<T>): Promise<T>;
-  /** Guarda un cuerpo de respuesta ya redactado; solo si la captura está activada. */
+  /** Captures a response after redaction when snapshots are enabled. */
   snapshot(label: string, content: string, meta?: Record<string, unknown>): void;
-  /** Devuelve un trazador que añade este contexto a cada evento (seguro con concurrencia). */
+  /** Adds context to the events emitted by the returned tracer. */
   with(context: Record<string, unknown>): Tracer;
-  /** Registra un valor que no debe aparecer jamás en la traza. */
+  /** Registers a secret for redaction. */
   addSecret(value: string): void;
   hasErrors(): boolean;
-  /** Escribe lo pendiente y devuelve dónde quedó la traza, si la hay. */
+  /** Flushes buffered events and returns the trace location when available. */
   flush(): string | undefined;
 }

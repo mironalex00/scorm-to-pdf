@@ -1,6 +1,6 @@
 import { launch } from "./cli/launch.ts";
 
-// Un rechazo sin capturar es un bug: que falle con ruido en lugar de seguir en silencio.
+// Treat an unhandled rejection as a fatal error.
 process.on("unhandledRejection", (reason) => {
   throw reason;
 });

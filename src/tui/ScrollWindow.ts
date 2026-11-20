@@ -1,4 +1,4 @@
-/** Ventana de filas visibles que sigue al cursor sin saltos innecesarios. */
+/** Keeps the focused row visible as the cursor moves. */
 export class ScrollWindow {
   private offset = 0;
 

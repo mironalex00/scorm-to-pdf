@@ -7,6 +7,7 @@ import type { Messages } from "../i18n/Messages.ts";
 export interface DownloadSettings {
   readonly concurrency: number;
   readonly maxImageBytes: number;
+  readonly maxDeckBytes?: number;
   readonly retries: number;
   readonly backoffMs: number;
 }
@@ -20,13 +21,11 @@ interface SlideTask {
 interface PoolState {
   next: number;
   done: number;
+  bytes: number;
   failure: unknown;
 }
 
-/**
- * Descarga las diapositivas con un pool de concurrencia acotada. Reintenta solo los fallos
- * transitorios, se detiene al primer error definitivo y conserva el orden original.
- */
+/** Downloads slides concurrently and preserves their order. Retries transient failures. */
 export class SlideDownloader {
   private readonly session: MoodleSession;
   private readonly logger: Logger;
@@ -50,7 +49,7 @@ export class SlideDownloader {
 
   async download(slides: readonly Slide[], entryUrl: URL): Promise<Uint8Array[]> {
     const images = new Array<Uint8Array>(slides.length);
-    const state: PoolState = { next: 0, done: 0, failure: undefined };
+    const state: PoolState = { next: 0, done: 0, bytes: 0, failure: undefined };
     const workers = Math.min(this.settings.concurrency, slides.length);
 
     await Promise.all(Array.from({ length: workers }, () => this.runWorker(slides, entryUrl, images, state)));
@@ -70,7 +69,14 @@ export class SlideDownloader {
       state.next += 1;
       const task: SlideTask = { slide: slides[index]!, position: index + 1, entryUrl };
       try {
-        images[index] = await this.fetchWithRetries(task, 0);
+        const image = await this.fetchWithRetries(task, 0);
+        if (state.failure !== undefined) return;
+        state.bytes += image.length;
+        const limit = this.settings.maxDeckBytes;
+        if (limit !== undefined && state.bytes > limit) {
+          throw new DownloadError(this.messages.downloader.deckTooLarge({ max: String(limit) }));
+        }
+        images[index] = image;
         state.done += 1;
         this.logger.progress({ done: state.done, total: slides.length, label: this.labelOf(task) });
       } catch (error) {

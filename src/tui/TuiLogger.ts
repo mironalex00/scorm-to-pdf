@@ -1,20 +1,17 @@
 import type { Logger, ProgressUpdate } from "../application/ports.ts";
 
-/** Registrador de la TUI: nada se imprime (la pantalla es de la TUI); el progreso se reenvía y los avisos se guardan. */
+/** Forwards progress to the active screen. */
 export class TuiLogger implements Logger {
-  readonly warnings: string[] = [];
   private listener: ((update: ProgressUpdate) => void) | undefined;
 
-  onProgress(listener: (update: ProgressUpdate) => void): void {
+  onProgress(listener: ((update: ProgressUpdate) => void) | undefined): void {
     this.listener = listener;
   }
 
   info(_message: string): void {}
   result(_message: string): void {}
 
-  warn(message: string): void {
-    this.warnings.push(message);
-  }
+  warn(_message: string): void {}
 
   progress(update: ProgressUpdate): void {
     this.listener?.(update);

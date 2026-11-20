@@ -1,7 +1,7 @@
 import type { LearningPlatform } from "../../src/application/ports.ts";
 import type { CourseContents, CourseItem, CourseSummary, FetchedItem } from "../../src/domain/catalog.ts";
 
-/** Plataforma en memoria: devuelve lo configurado y cuenta las llamadas. */
+/** Returns configured Moodle data and counts calls. */
 export class FakePlatform implements LearningPlatform {
   readonly id = "fake";
   readonly calls = { listCourses: 0, loadContents: [] as string[], fetchItem: [] as string[] };

@@ -1,10 +1,7 @@
 import type { CourseItem, Section } from "../domain/catalog.ts";
 import type { FileNamer } from "./FileNamer.ts";
 
-/**
- * Asigna de antemano un nombre base a cada ítem. Los duplicados de una misma sección se numeran
- * por orden de entrada, así el resultado no depende de qué descarga termine antes.
- */
+/** Plans names in catalog order so download completion order cannot affect them. */
 export class NamePlanner {
   private readonly namer: FileNamer;
 
@@ -17,7 +14,7 @@ export class NamePlanner {
     return this.namer.directoryNames(ordered.map(({ number, title }) => [number, title.trim() || String(number)]));
   }
 
-  plan(items: readonly CourseItem[]): Map<string, string> {
+  plan(items: readonly CourseItem[], groupByItem = true): Map<string, string> {
     const sections = new Map<number, Array<readonly [string, string]>>();
     const plan = new Map<string, string>();
     for (const item of items) {
@@ -26,7 +23,7 @@ export class NamePlanner {
       sections.set(item.sectionNumber, section);
     }
     for (const section of sections.values()) {
-      for (const [id, name] of this.namer.directoryNames(section)) plan.set(id, name);
+      for (const [id, name] of this.namer.directoryNames(section, !groupByItem)) plan.set(id, name);
     }
     return plan;
   }

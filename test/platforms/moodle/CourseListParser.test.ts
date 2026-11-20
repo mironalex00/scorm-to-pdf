@@ -2,13 +2,13 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { CourseListParser } from "../../../src/platforms/moodle/CourseListParser.ts";
 import { AuthenticationError, PlatformError } from "../../../src/domain/errors.ts";
-import { es } from "../../../src/i18n/es.ts";
+import { en } from "../../../src/i18n/en.ts";
 import { coursesJson } from "../../fixtures/moodle.ts";
 
-const parser = new CourseListParser({ messages: es });
+const parser = new CourseListParser({ messages: en });
 
-describe("CourseListParser · respuestas válidas", () => {
-  it("extrae id (como texto) y nombre decodificado, e informa de las entradas descartadas", () => {
+describe("CourseListParser valid responses", () => {
+  it("returns string IDs and decoded names and counts invalid entries", () => {
     const raw = JSON.stringify([{ error: false, data: { courses: [
       { id: 101, fullname: "Algoritmi &amp; date" },
       { id: "102", fullname: "Fizică" },
@@ -22,36 +22,36 @@ describe("CourseListParser · respuestas válidas", () => {
     });
   });
 
-  it("acepta una lista vacía", () => {
+  it("accepts an empty course list", () => {
     assert.deepEqual(parser.parse(coursesJson([])), { courses: [], skipped: 0 });
   });
 });
 
-describe("CourseListParser · errores", () => {
+describe("CourseListParser errors", () => {
   const platformErrors: Array<[string, string, RegExp]> = [
-    ["no es JSON", "<html>", /no es JSON/],
-    ["error de servicio con excepción", JSON.stringify([{ error: true, exception: { errorcode: "accessexception", message: "Sin acceso" } }]), /accessexception.*Sin acceso/],
-    ["error sin excepción", JSON.stringify([{ error: true }]), /desconocido/],
-    ["objeto sin errorcode", "{}", /\{\}/],
-    ["array vacío", "[]", /\[\]/],
-    ["elemento que no es objeto", "[1]", /number/],
-    ["sin data", JSON.stringify([{ error: false }]), /error: boolean/],
-    ["courses que no es array", JSON.stringify([{ error: false, data: { courses: "x" } }]), /courses: string/],
-    ["error de servicio de nivel superior", JSON.stringify({ error: "Fallo", errorcode: "otracosa" }), /otracosa.*Fallo/],
+    ["non-JSON input", "<html>", /is not JSON/],
+    ["a service error with exception details", JSON.stringify([{ error: true, exception: { errorcode: "accessexception", message: "Sin acceso" } }]), /accessexception.*Sin acceso/],
+    ["a service error without exception details", JSON.stringify([{ error: true }]), /unknown/],
+    ["an object without errorcode", "{}", /\{\}/],
+    ["an empty response array", "[]", /\[\]/],
+    ["a non-object response entry", "[1]", /number/],
+    ["a response entry without data", JSON.stringify([{ error: false }]), /error: boolean/],
+    ["a non-array courses field", JSON.stringify([{ error: false, data: { courses: "x" } }]), /courses: string/],
+    ["a top-level service error", JSON.stringify({ error: "Fallo", errorcode: "otracosa" }), /otracosa.*Fallo/],
   ];
   for (const [name, raw, pattern] of platformErrors) {
-    it(`PlatformError cuando ${name}`, () => {
+    it(`throws PlatformError for ${name}`, () => {
       assert.throws(() => parser.parse(raw), (e: unknown) => e instanceof PlatformError && pattern.test(e.message));
     });
   }
 
   const authErrors: Array<[string, string]> = [
-    ["sesskey inválido", JSON.stringify([{ error: true, exception: { errorcode: "invalidsesskey", message: "x" } }])],
-    ["servicio que exige login", JSON.stringify({ error: "Debe iniciar sesión", errorcode: "servicerequireslogin" })],
-    ["login requerido", JSON.stringify({ error: "x", errorcode: "requireloginerror" })],
+    ["an invalid session key", JSON.stringify([{ error: true, exception: { errorcode: "invalidsesskey", message: "x" } }])],
+    ["a service that requires sign-in", JSON.stringify({ error: "Debe iniciar sesión", errorcode: "servicerequireslogin" })],
+    ["a sign-in requirement", JSON.stringify({ error: "x", errorcode: "requireloginerror" })],
   ];
   for (const [name, raw] of authErrors) {
-    it(`AuthenticationError cuando ${name}`, () => {
+    it(`throws AuthenticationError for ${name}`, () => {
       assert.throws(() => parser.parse(raw), AuthenticationError);
     });
   }

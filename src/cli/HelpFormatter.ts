@@ -2,7 +2,7 @@ import type { Messages } from "../i18n/Messages.ts";
 import { ASCII_GLOBAL_OPTIONS, ASCII_OPTIONS, GET_OPTIONS, GLOBAL_OPTIONS, LIST_OPTIONS, SCORM_OPTIONS } from "./optionSpecs.ts";
 import type { OptionSpec } from "./optionSpecs.ts";
 
-/** Genera la ayuda desde las especificaciones de opciones y el catálogo de mensajes. */
+/** Formats help using the option specs and locale catalog. */
 export class HelpFormatter {
   readonly programName: string;
   private readonly messages: Messages;

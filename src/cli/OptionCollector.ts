@@ -16,7 +16,7 @@ interface OptionToken {
   readonly inlineValue: boolean | undefined;
 }
 
-/** Lee argv contra una lista de opciones: valida valores, duplicados y desconocidas (con sugerencia). */
+/** Validates options and suggests a spelling for unknown flags. */
 export class OptionCollector {
   private readonly messages: Messages;
 
@@ -24,7 +24,7 @@ export class OptionCollector {
     this.messages = deps.messages;
   }
 
-  /** Primer argumento posicional, sin validar nada: sirve para elegir la orden. */
+  /** Finds the command before full option validation. */
   firstPositional(argv: readonly string[], specs: readonly OptionSpec[]): string | undefined {
     const parsed = parseArgs({ args: [...argv], options: this.config(specs), allowPositionals: true, strict: false, tokens: true });
     const first = parsed.tokens.find((token) => token.kind === "positional");

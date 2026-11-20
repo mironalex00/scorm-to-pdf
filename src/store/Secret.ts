@@ -1,6 +1,6 @@
 import { inspect } from "node:util";
 
-/** Valor sensible (sesskey, cookie…). Solo `reveal()` lo entrega; todo lo demás muestra la etiqueta. */
+/** Inspection and serialization show the label. Use `reveal()` to read the value. */
 export class Secret {
   readonly #value: string;
   readonly #label: string;

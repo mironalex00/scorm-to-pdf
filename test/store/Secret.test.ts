@@ -4,11 +4,11 @@ import { inspect } from "node:util";
 import { Secret } from "../../src/store/Secret.ts";
 
 describe("Secret", () => {
-  it("entrega su valor solo con reveal()", () => {
+  it("returns the underlying value through reveal()", () => {
     assert.equal(Secret.of("abc123", "sesskey").reveal(), "abc123");
   });
 
-  it("nunca muestra el valor al convertirlo en texto, JSON o inspeccionarlo", () => {
+  it("hides the value in string, JSON, and inspection output", () => {
     const secret = Secret.of("abc123", "sesskey");
     for (const out of [String(secret), `${secret}`, JSON.stringify(secret), inspect(secret)]) {
       assert.ok(!out.includes("abc123"));

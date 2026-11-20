@@ -22,7 +22,7 @@ export interface ConversionReport {
   readonly title: string | undefined;
 }
 
-/** Caso de uso heredado: del ID de un módulo SCORM al PDF escrito. Solo orquesta; no hace E/S directa. */
+/** Coordinates conversion of a SCORM module into a saved PDF. */
 export class ConvertScormToPdf {
   private readonly locator: ScormLocator;
   private readonly slides: SlidesToPdf;

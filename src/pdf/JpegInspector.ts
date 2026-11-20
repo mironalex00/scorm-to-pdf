@@ -16,7 +16,7 @@ const TEMPORARY = 0x01;
 const RESTART_FIRST = 0xd0;
 const RESTART_LAST = 0xd7;
 
-/** Lee las dimensiones y los componentes de un JPEG recorriendo sus marcadores. */
+/** Reads JPEG dimensions and component counts from the marker segments. */
 export class JpegInspector {
   private readonly messages: Messages;
 

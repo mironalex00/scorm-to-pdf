@@ -37,8 +37,8 @@ function make() {
   return { input, output, terminal: new RawTerminal({ input, output }) };
 }
 
-describe("RawTerminal · estado", () => {
-  it("es interactiva solo con entrada y salida TTY y modo raw disponible", () => {
+describe("RawTerminal state", () => {
+  it("requires TTY input, TTY output, and raw mode for interactivity", () => {
     assert.equal(make().terminal.interactive, true);
     const noInputTty = make();
     noInputTty.input.isTTY = undefined;
@@ -51,7 +51,7 @@ describe("RawTerminal · estado", () => {
     assert.equal(new RawTerminal({ input: noRaw.input, output: noRaw.output }).interactive, false);
   });
 
-  it("informa del tamaño real o de 80×24 si la salida no lo conoce", () => {
+  it("reports the terminal size or defaults to 80 by 24", () => {
     const { terminal, output } = make();
     assert.deepEqual(terminal.size(), { columns: 100, rows: 30 });
     output.columns = undefined;
@@ -60,8 +60,8 @@ describe("RawTerminal · estado", () => {
   });
 });
 
-describe("RawTerminal · apertura y cierre", () => {
-  it("open entra en pantalla alternativa, oculta el cursor y activa el modo raw; close lo restaura todo", () => {
+describe("RawTerminal opening and closing", () => {
+  it("enters the alternate screen in raw mode and restores the terminal on close", () => {
     const { terminal, input, output } = make();
     terminal.open();
     assert.deepEqual(input.raw, [true]);
@@ -76,7 +76,7 @@ describe("RawTerminal · apertura y cierre", () => {
     assert.equal(output.written.join(""), "\x1b[?1049h\x1b[?25l\x1b[?25h\x1b[?1049l");
   });
 
-  it("open y close son idempotentes y close sin open no toca nada", () => {
+  it("allows repeated calls to open and close", () => {
     const { terminal, input, output } = make();
     terminal.close();
     assert.deepEqual([input.raw, output.written], [[], []]);
@@ -87,17 +87,36 @@ describe("RawTerminal · apertura y cierre", () => {
     terminal.close();
     assert.deepEqual(input.raw, [true, false]);
   });
+
+  it("cancels a pending read when the terminal closes", async () => {
+    const { terminal } = make();
+    terminal.open();
+    const pending = terminal.readKey();
+    terminal.close();
+    assert.deepEqual(await pending, { name: "ctrl-c" });
+  });
+
+  it("discards queued keys when the terminal closes", async () => {
+    const { terminal, input } = make();
+    terminal.open();
+    input.press("a", undefined);
+    terminal.close();
+    terminal.open();
+    input.press("b", undefined);
+    assert.deepEqual(await terminal.readKey(), { name: "char", char: "b" });
+    terminal.close();
+  });
 });
 
-describe("RawTerminal · dibujo", () => {
-  it("render coloca el cursor al inicio, borra hasta el final de cada línea y limpia lo que sobre", () => {
+describe("RawTerminal rendering", () => {
+  it("positions the cursor and clears old frame content", () => {
     const { terminal, output } = make();
     terminal.render(["uno", "dos"]);
     assert.equal(output.written[0], "\x1b[H" + "uno\x1b[K\r\n" + "dos\x1b[K" + "\x1b[J");
   });
 });
 
-describe("RawTerminal · teclado", () => {
+describe("RawTerminal input", () => {
   const read = async (str: string | undefined, key: Record<string, unknown> | undefined) => {
     const { terminal, input } = make();
     terminal.open();
@@ -113,7 +132,7 @@ describe("RawTerminal · teclado", () => {
     ["\r", { name: "return" }, "enter"],
     ["\n", { name: "enter" }, "enter"],
     ["\x1b", { name: "escape" }, "escape"],
-    // Forma real: readline emite un Esc suelto, tras su temporizador de secuencias, con meta: true.
+    // readline reports a standalone Escape with meta set after its sequence timeout.
     ["\x1b", { name: "escape", meta: true, sequence: "\x1b" }, "escape"],
     ["\x7f", { name: "backspace" }, "backspace"],
     ["\t", { name: "tab" }, "tab"],
@@ -123,10 +142,10 @@ describe("RawTerminal · teclado", () => {
     ["\x1b[F", { name: "end" }, "end"],
   ];
   for (const [str, key, expected] of named) {
-    it(`traduce ${expected} (${JSON.stringify(str)})`, async () => assert.deepEqual(await read(str, key), { name: expected }));
+    it(`decodes ${expected} (${JSON.stringify(str)})`, async () => assert.deepEqual(await read(str, key), { name: expected }));
   }
 
-  it("traduce el espacio, los caracteres imprimibles (incluidos acentos y mayúsculas) y Ctrl+C", async () => {
+  it("decodes spaces, printable characters, and Ctrl+C", async () => {
     assert.deepEqual(await read(" ", { name: "space" }), { name: "space", char: " " });
     assert.deepEqual(await read("a", { name: "a" }), { name: "char", char: "a" });
     assert.deepEqual(await read("A", { name: "a", shift: true }), { name: "char", char: "A" });
@@ -134,7 +153,7 @@ describe("RawTerminal · teclado", () => {
     assert.deepEqual(await read("\x03", { name: "c", ctrl: true }), { name: "ctrl-c" });
   });
 
-  it("un texto pegado de varios caracteres llega como una tecla por carácter, y se ignora lo no imprimible", async () => {
+  it("splits pasted text into individual keys and ignores nonprintable input", async () => {
     const { terminal, input } = make();
     terminal.open();
     input.press("ab c", undefined);
@@ -148,7 +167,7 @@ describe("RawTerminal · teclado", () => {
     );
   });
 
-  it("readKey espera a que llegue una tecla y entrega las anteriores en orden", async () => {
+  it("waits for a key and returns queued keys in order", async () => {
     const { terminal, input } = make();
     terminal.open();
     const pending = terminal.readKey();
@@ -157,5 +176,19 @@ describe("RawTerminal · teclado", () => {
     input.press("\x1b[B", { name: "down" });
     input.press("\r", { name: "return" });
     assert.deepEqual([await terminal.readKey(), await terminal.readKey()], [{ name: "down" }, { name: "enter" }]);
+  });
+
+  it("releases an aborted pending read so the next key reaches the next reader", async () => {
+    const { terminal, input } = make();
+    terminal.open();
+    const controller = new AbortController();
+    const cancelled = new Error("Reading was cancelled");
+    const pending = terminal.readKey(controller.signal);
+    controller.abort(cancelled);
+    await assert.rejects(pending, cancelled);
+    const next = terminal.readKey();
+    input.press("\r", { name: "return" });
+    assert.deepEqual(await next, { name: "enter" });
+    terminal.close();
   });
 });

@@ -3,7 +3,7 @@ import type { KeyName, KeyPress, Terminal, TerminalSize } from "../../src/tui/Te
 export const key = (name: Exclude<KeyName, "char">): KeyPress => ({ name, ...(name === "space" && { char: " " }) });
 export const chars = (text: string): KeyPress[] => [...text].map((char) => (char === " " ? key("space") : { name: "char", char }));
 
-/** Terminal de pega: entrega las teclas del guion, guarda cada cuadro dibujado y cuenta aperturas y cierres. */
+/** Replays a key script and records frames and terminal state changes. */
 export class ScriptedTerminal implements Terminal {
   readonly frames: string[][] = [];
   opened = 0;
@@ -31,7 +31,7 @@ export class ScriptedTerminal implements Terminal {
   }
   async readKey(): Promise<KeyPress> {
     const next = this.keys.shift();
-    if (!next) throw new Error("ScriptedTerminal: no quedan teclas en el guion");
+    if (!next) throw new Error("ScriptedTerminal ran out of keys");
     return next;
   }
   get lastFrame(): string {

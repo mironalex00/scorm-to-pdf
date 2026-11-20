@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import { NullTracer } from "../../src/tracing/NullTracer.ts";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import assert from "node:assert/strict";
 import { ConvertScormToPdf } from "../../src/application/ConvertScormToPdf.ts";
 import type { ConversionRequest } from "../../src/application/ConvertScormToPdf.ts";
@@ -25,22 +25,22 @@ function build() {
   const http = new FakeHttpClient();
   const sink = new MemoryFileSink();
   const logger = new MemoryLogger();
-  const session = new MoodleSession({ messages: es, tracer: new NullTracer(), http, cookie: SessionCookie.parse("abc", es), baseUrl: BASE });
+  const session = new MoodleSession({ messages: en, tracer: new NullTracer(), http, cookie: SessionCookie.parse("abc", en), baseUrl: BASE });
   const useCase = new ConvertScormToPdf({
-    messages: es,
-    locator: new ScormLocator({ messages: es, session, logger, maxRevision: 4, probeBatchSize: 2 }),
+    messages: en,
+    locator: new ScormLocator({ messages: en, session, logger, maxRevision: 4, probeBatchSize: 2 }),
     slides: new SlidesToPdf({
-      messages: es,
+      messages: en,
       logger,
-      parser: new SlideListParser({ messages: es, maxSlides: 10 }),
+      parser: new SlideListParser({ messages: en, maxSlides: 10 }),
       downloader: new SlideDownloader({
-        messages: es,
+        messages: en,
         session,
         logger,
         delay: new RecordingDelay(),
         settings: { concurrency: 2, maxImageBytes: 1_000_000, retries: 0, backoffMs: 1 },
       }),
-      pdfBuilder: new PdfBuilder({ messages: es, pageWidth: 960, pageHeight: 540, inspector: new JpegInspector({ messages: es }) }),
+      pdfBuilder: new PdfBuilder({ messages: en, pageWidth: 960, pageHeight: 540, inspector: new JpegInspector({ messages: en }) }),
     }),
     namer: new OutputNamer({ maxStemLength: 40 }),
     sink,
@@ -69,7 +69,7 @@ const request: ConversionRequest = {
 };
 
 describe("ConvertScormToPdf", () => {
-  it("con solo el ID descarga, genera el PDF y lo nombra según el título del curso", async () => {
+  it("downloads and names the PDF from the course title when given an ID", async () => {
     const { http, sink, useCase } = build();
     serveDeck(http, "AFSD · Curs 5. Funcții și descompunerea problemelor");
 
@@ -82,14 +82,14 @@ describe("ConvertScormToPdf", () => {
     assert.equal(Buffer.from(pdf).subarray(0, 8).toString("latin1"), "%PDF-1.4");
   });
 
-  it("deja el PDF en la carpeta pedida cuando se usa --out-dir", async () => {
+  it("writes the PDF to the directory specified by --out-dir", async () => {
     const { http, sink, useCase } = build();
     serveDeck(http, "AFSD · Curs 5. X");
     await useCase.execute({ ...request, outDir: "pdfs" });
     assert.deepEqual([...sink.files.keys()], ["pdfs/AFSD-Curs-5.pdf"]);
   });
 
-  it("respeta una ruta de salida explícita", async () => {
+  it("honors an explicit output path", async () => {
     const { http, sink, useCase } = build();
     serveDeck(http, "AFSD · Curs 5. X");
     const report = await useCase.execute({ ...request, outPath: "mio/curso.pdf" });
@@ -97,7 +97,7 @@ describe("ConvertScormToPdf", () => {
     assert.deepEqual([...sink.files.keys()], ["mio/curso.pdf"]);
   });
 
-  it("sin título en el documento usa scorm-<id>.pdf", async () => {
+  it("uses scorm-<id>.pdf when the document has no title", async () => {
     const { http, sink, useCase } = build();
     serveDeck(http, undefined);
     const report = await useCase.execute(request);
@@ -106,33 +106,33 @@ describe("ConvertScormToPdf", () => {
     assert.equal(sink.files.size, 1);
   });
 
-  it("informa de cada hito para que el usuario vea qué ocurre", async () => {
+  it("reports each stage of the conversion", async () => {
     const { http, logger, useCase } = build();
     serveDeck(http, "AFSD · Curs 5. X");
     await useCase.execute(request);
-    assert.match(logger.infos[0]!, /SCORM 10067.*revisión 1.*AFSD · Curs 5\. X/);
-    assert.match(logger.infos[1]!, /2 diapositivas/);
-    assert.match(logger.infos[2]!, /Generando el PDF/);
+    assert.match(logger.infos[0]!, /SCORM 10067.*revision 1.*AFSD · Curs 5\. X/);
+    assert.match(logger.infos[1]!, /2 slides/);
+    assert.match(logger.infos[2]!, /Building the PDF/);
     assert.equal(logger.updates.length, 2);
   });
 });
 
-describe("ConvertScormToPdf · fallos sin dejar archivos a medias", () => {
-  it("una sesión inválida aborta antes de escribir nada", async () => {
+describe("ConvertScormToPdf output on failure", () => {
+  it("writes nothing when the session is invalid", async () => {
     const { http, sink, useCase } = build();
     http.on(`${ROOT}/index.html`, redirectResponse("/login/index.php"));
     await assert.rejects(useCase.execute(request), AuthenticationError);
     assert.equal(sink.files.size, 0);
   });
 
-  it("un documento sin SLIDES aborta con error de formato", async () => {
+  it("reports a format error when the document contains no SLIDES array", async () => {
     const { http, sink, useCase } = build();
     http.on(`${ROOT}/index.html`, okResponse("<title>Otra cosa</title>"));
     await assert.rejects(useCase.execute(request), ScormFormatError);
     assert.equal(sink.files.size, 0);
   });
 
-  it("si una diapositiva falla no se escribe un PDF incompleto", async () => {
+  it("writes no partial PDF when a slide fails", async () => {
     const { http, sink, useCase } = build();
     serveDeck(http, "AFSD · Curs 5. X");
     http.on(`${ROOT}/slides/b.jpg`, statusResponse(400));

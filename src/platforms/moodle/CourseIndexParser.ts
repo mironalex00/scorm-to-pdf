@@ -4,11 +4,11 @@ import type { HtmlElement, HtmlParser } from "../../html/HtmlParser.ts";
 export interface IndexStats {
   readonly sections: number;
   readonly items: number;
-  /** Módulos que existen en el curso pero no se descargan, por tipo (forum, url…). */
+  /** Ignored activities grouped by Moodle module type. */
   readonly skippedModules: Record<string, number>;
-  /** Elementos que parecían ítems o secciones pero se descartaron, y por qué. */
+  /** Reasons for skipping candidate sections or activities. */
   readonly dropped: Record<"unnamed" | "noHref" | "noId" | "invalidHref" | "duplicate" | "invalidSections", number>;
-  /** Huella del marcado: cuántos elementos hay por cada valor de data-for. */
+  /** Count of elements by data-for value. */
   readonly markers: Record<string, number>;
 }
 
@@ -23,7 +23,7 @@ function isSection(element: HtmlElement): boolean {
   return element.hasClass("courseindex-section") || element.attr("data-for") === "section";
 }
 
-/** Una subsección tiene sus propios títulos y actividades. */
+/** Subsections have their own titles and activities. */
 function* sectionDescendants(element: HtmlElement): IterableIterator<HtmlElement> {
   for (const child of element.children) {
     if (typeof child === "string" || isSection(child)) continue;
@@ -41,10 +41,7 @@ function activityNameText(element: HtmlElement): string {
   return text;
 }
 
-/**
- * Lee las secciones y actividades del cuerpo del curso y del índice lateral de Moodle.
- * Si ambos describen el mismo material, prevalece su ubicación en el cuerpo.
- */
+/** Reads Moodle sections and activities. Course body placement takes precedence over the sidebar. */
 export class CourseIndexParser {
   private readonly html: HtmlParser;
 

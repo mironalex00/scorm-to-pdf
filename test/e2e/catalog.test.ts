@@ -37,79 +37,79 @@ async function run(moodle: LocalServer, argv: string[], env: Record<string, stri
 const files = async (dir: string): Promise<string[]> =>
   (await readdir(dir, { recursive: true })).map(String).filter((name) => name.endsWith(".pdf")).sort();
 
-describe("e2e · listar", () => {
-  it("courses lista los cursos ordenados alfabéticamente (id y nombre)", async () => {
+describe("Course and section listings", () => {
+  it("lists course IDs and names alphabetically", async () => {
     const { code, stdout } = await run(await server(), ["courses"]);
     assert.equal(code, 0);
     assert.equal(stdout, "102\tAlgoritmi fundamentali\n101\tStructuri de date\n");
   });
 
-  it("courses --json devuelve JSON utilizable por otros programas", async () => {
+  it("emits parseable JSON for courses --json", async () => {
     const { stdout } = await run(await server(), ["courses", "--json"]);
     assert.deepEqual((JSON.parse(stdout) as Array<{ id: string }>).map((c) => c.id), ["102", "101"]);
   });
 
-  it("items muestra las semanas de menor a mayor con sus contenidos descargables y omite el resto", async () => {
+  it("lists sections numerically and includes only downloadable items", async () => {
     const { code, stdout } = await run(await server(), ["items", "algoritmi"]);
     assert.equal(code, 0);
     assert.deepEqual(stdout.trimEnd().split("\n"), [
-      "Semana 0 — General",
-      "  [recurso] 501  Programa",
-      "Semana 1 — Săptămâna 1",
+      "Section 0 - General",
+      "  [resource] 501  Programa",
+      "Section 1 - Săptămâna 1",
       "  [scorm] 511  Curs 5. Funcții",
-      "  [recurso] 512  Exerciții & teme",
-      "Semana 3 — Săptămâna 3",
-      "  [recurso] 531  Complementar",
+      "  [resource] 512  Exerciții & teme",
+      "Section 3 - Săptămâna 3",
+      "  [resource] 531  Complementar",
     ]);
   });
 
-  it("items --json y los errores de selección de curso", async () => {
+  it("returns item JSON and reports missing or ambiguous course selections", async () => {
     const moodle = await server();
     const json = JSON.parse((await run(moodle, ["items", "102", "--json"])).stdout) as { weeks: unknown[] };
     assert.equal(json.weeks.length, 3);
 
-    const missing = await run(moodle, ["items", "nada"]);
+    const missing = await run(moodle, ["items", "missing"]);
     assert.equal(missing.code, 2);
-    assert.ok(!missing.stderr.includes("Traza guardada"), "un error de uso no es un fallo que merezca traza");
+    assert.ok(!missing.stderr.includes("Trace saved"), "usage errors leave no trace");
     assert.deepEqual((await readdir(work)).filter((n) => n.startsWith("scorm-trace-")), []);
-    assert.match(missing.stderr, /No se encontró ningún curso.*«nada»/);
+    assert.match(missing.stderr, /No course matches "missing"/);
 
     const ambiguous = await run(moodle, ["items", "d"]);
     assert.equal(ambiguous.code, 2);
-    assert.match(ambiguous.stderr, /varios cursos.*102 \(Algoritmi fundamentali\); 101/);
+    assert.match(ambiguous.stderr, /matches multiple courses.*102 \(Algoritmi fundamentali\); 101/);
   });
 
-  it("una semana sin contenido descargable se indica", async () => {
+  it("labels a section with no downloadable content", async () => {
     const empty = await run(await server(), ["items", "101"]);
-    assert.match(empty.stdout, /Semana 2 — Tema\n {2}\[recurso\] 601 {2}Tema 1/);
+    assert.match(empty.stdout, /Section 2 - Tema\n {2}\[resource\] 601 {2}Tema 1/);
   });
 });
 
-describe("e2e · descargar", () => {
+describe("Course downloads", () => {
   const dest = () => join(work, "material");
 
-  it("get --all crea <destino>/<semana>/<nombre><ext>: archivos tal cual y SCORM convertido a PDF", async () => {
+  it("saves direct files and converted SCORM PDFs under their section folders", async () => {
     const { code, stdout, stderr } = await run(await server(), ["get", "algoritmi", "--all", "--dest", dest(), "-q"]);
     assert.equal(code, 0, stderr);
     assert.deepEqual(await files(dest()), ["General/Programa.pdf", "Săptămâna 1/Curs 5. Funcții.pdf", "Săptămâna 1/Exerciții & teme.pdf", "Săptămâna 3/Complementar.pdf"]);
     for (const file of await files(dest())) {
       assert.equal((await readFile(join(dest(), file))).subarray(0, 4).toString("latin1"), "%PDF");
     }
-    assert.equal(stdout.trimEnd().split("\n").length, 4, "con -q solo se imprimen las rutas");
-    // el SCORM pasa por la conversión de imágenes: 2 diapositivas → 2 páginas
+    assert.equal(stdout.trimEnd().split("\n").length, 4, "quiet mode prints only paths");
+    // Each of the two SCORM slides becomes a PDF page.
     assert.match((await readFile(join(dest(), "Săptămâna 1/Curs 5. Funcții.pdf"))).toString("latin1"), /\/Count 2 >>/);
   });
 
-  it("una segunda ejecución omite lo que ya existe sin sobrescribirlo", async () => {
+  it("preserves files from a previous run", async () => {
     const moodle = await server();
     await run(moodle, ["get", "algoritmi", "--all", "--dest", dest(), "-q"]);
     const again = await run(moodle, ["get", "algoritmi", "--all", "--dest", dest()]);
     assert.equal(again.code, 0);
-    assert.equal((again.stdout.match(/Omitido \(ya existe\)/g) ?? []).length, 4);
-    assert.match(again.stdout, /Descargados: 0 · Omitidos: 4 · Fallidos: 0/);
+    assert.equal((again.stdout.match(/Skipped \(already exists\)/g) ?? []).length, 4);
+    assert.match(again.stdout, /Downloaded: 0 \| Skipped: 4 \| Failed: 0/);
   });
 
-  it("--week y --item eligen solo lo pedido", async () => {
+  it("downloads only the requested sections or items", async () => {
     const moodle = await server();
     await run(moodle, ["get", "algoritmi", "--week", "3", "--dest", dest(), "-q"]);
     assert.deepEqual(await files(dest()), ["Săptămâna 3/Complementar.pdf"]);
@@ -117,38 +117,44 @@ describe("e2e · descargar", () => {
     assert.deepEqual(await files(dest()), ["General/Programa.pdf", "Săptămâna 3/Complementar.pdf"]);
   });
 
-  it("una selección vacía (semana inexistente) es un error de uso", async () => {
+  it("returns a usage error when the selection is empty", async () => {
     const { code, stderr } = await run(await server(), ["get", "algoritmi", "--week", "9", "--dest", dest()]);
     assert.equal(code, 2);
-    assert.match(stderr, /nada que descargar/);
+    assert.match(stderr, /Nothing to download/);
   });
 
-  it("un fallo parcial no impide descargar el resto y deja traza donde localizarlo", async () => {
+  it("continues after a failed download and writes a trace only on request", async () => {
     const moodle = await server({ failItems: ["531"] });
-    const { code, stdout, stderr } = await run(moodle, ["get", "algoritmi", "--all", "--dest", dest()]);
+    const args = ["get", "algoritmi", "--all", "--dest", dest()];
+    const { code, stdout, stderr } = await run(moodle, args);
     assert.equal(code, 1);
-    assert.match(stdout, /Descargados: 3 · Omitidos: 0 · Fallidos: 1/);
-    assert.match(stderr, /Fallo en «Complementar»/);
-    assert.match(stderr, /Traza guardada en .*scorm-trace-[0-9a-f]{8}\. Repite con --trace/);
+    assert.match(stdout, /Downloaded: 3 \| Skipped: 0 \| Failed: 1/);
+    assert.match(stderr, /Failed to download "Complementar"/);
+    assert.match(stderr, /Run again with --trace/);
+    assert.deepEqual((await readdir(work)).filter((name) => name.startsWith("scorm-trace-")), []);
+
+    const traced = await run(moodle, [...args, "--trace"]);
+    assert.equal(traced.code, 1);
+    assert.match(traced.stderr, /Trace saved to .*scorm-trace-[0-9a-f]{8}/);
 
     const traceDir = (await readdir(work)).find((name) => name.startsWith("scorm-trace-"))!;
     const lines = (await readFile(join(work, traceDir, "trace.jsonl"), "utf8")).trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
     const failure = lines.find((e) => e.name === "item.fail" && (e.ctx as { item: string }).item === "531")!;
     assert.equal(failure.scope, "download");
     assert.ok(typeof failure.ms === "number" && typeof failure.t === "string");
-    assert.match(String((failure.error as { chain: string[] }).chain[0]), /NotFoundError|No existe/);
+    assert.match(String((failure.error as { chain: string[] }).chain[0]), /NotFoundError|Resource not found/);
   });
 
-  it("una sesión caducada devuelve el código 3", async () => {
+  it("returns exit status 3 for an expired session", async () => {
     const { code, stderr } = await run(await server(), ["courses"], { MOODLE_COOKIE: "caducada-000000" });
     assert.equal(code, 3);
-    assert.match(stderr, /Cookies enviadas \(solo nombres\): MoodleSession/);
+    assert.match(stderr, /Cookies sent \(names only\): MoodleSession/);
     assert.ok(!stderr.includes("caducada-000000"));
   });
 });
 
-describe("e2e · plataforma, idioma y trazabilidad", () => {
-  it("con la extensión ro.utcluj.kb carga el curso completo directamente", async () => {
+describe("Platform, locale, and diagnostics", () => {
+  it("loads the course page directly with the UTCN profile", async () => {
     const moodle = await server();
     const traceDir = join(work, "t");
     const { code } = await run(moodle, ["items", "102", "--platform", "ro.utcluj.kb", "--trace", "--trace-dir", traceDir]);
@@ -158,56 +164,58 @@ describe("e2e · plataforma, idioma y trazabilidad", () => {
     assert.deepEqual(outcomes, ["course/view.php?id={courseId}→ok"]);
   });
 
-  it("--trace guarda la traza y capturas redactadas: ni la cookie ni el sesskey salen de la memoria", async () => {
+  it("saves diagnostic events and redacts the cookie and session key", async () => {
     const traceDir = join(work, "trace");
     const { code, stderr } = await run(await server(), ["courses", "--trace", "--trace-dir", traceDir]);
     assert.equal(code, 0);
-    assert.match(stderr, /Traza guardada en/);
+    assert.match(stderr, /Trace saved to/);
 
     const names = await readdir(traceDir, { recursive: true });
     assert.ok(names.some((n) => String(n).includes("courses-page")) && names.some((n) => String(n).includes("courses-json")));
     for (const name of names.map(String).filter((n) => n.endsWith(".txt") || n.endsWith(".jsonl"))) {
       const content = await readFile(join(traceDir, name), "utf8");
-      assert.ok(!content.includes(COOKIE) && !content.includes(SESSKEY), `filtración en ${name}`);
+      assert.ok(!content.includes(COOKIE) && !content.includes(SESSKEY), `Secret leaked in ${name}`);
     }
     assert.match(await readFile(join(traceDir, "trace.jsonl"), "utf8"), /"name":"run.start"/);
   });
 
-  it("diagnose recorre la cadena completa, marca cada paso y guarda la traza", async () => {
+  it("runs the diagnosis, reports each step, and saves a trace", async () => {
     const traceDir = join(work, "diag");
     const { code, stdout } = await run(await server(), ["diagnose", "--trace-dir", traceDir]);
     assert.equal(code, 0, stdout);
-    assert.match(stdout, /✓ Lista de cursos: 2 cursos/);
-    assert.match(stdout, /✓ Contenido de un curso: 3 secciones, 4 contenidos/);
-    assert.match(stdout, /✓ Resolver un recurso: «Programa»/);
-    assert.match(stdout, /✓ Resolver un SCORM: «Curs 5\. Funcții»/);
-    assert.match(stdout, new RegExp(`Traza completa en: ${traceDir}`));
+    assert.match(stdout, /OK  List courses: Courses found: 2/);
+    assert.match(stdout, /OK  Read course contents: Sections: 3, items: 4/);
+    assert.match(stdout, /OK  Resolve a resource: "Programa"/);
+    assert.match(stdout, /OK  Resolve a SCORM: "Curs 5\. Funcții"/);
+    assert.match(stdout, new RegExp(`Full trace saved to ${traceDir}`));
     assert.ok((await readdir(join(traceDir, "snapshots"))).length > 3);
   });
 
-  it("diagnose con la sesión caducada falla el primer paso, omite el resto y sale con 3", async () => {
+  it("stops diagnosis at the first step when the session has expired", async () => {
     const { code, stdout } = await run(await server(), ["diagnose", "--trace-dir", join(work, "d2")], { MOODLE_COOKIE: "caducada-000000" });
     assert.equal(code, 3);
-    assert.match(stdout, /✗ Lista de cursos/);
-    assert.ok(!stdout.includes("Contenido de un curso"));
+    assert.match(stdout, /FAIL  List courses/);
+    assert.ok(!stdout.includes("Read course contents"));
   });
 
-  it("una plataforma desconocida o un idioma no soportado son errores de uso", async () => {
+  it("rejects an unknown platform or an unsupported locale", async () => {
     const moodle = await server();
     const platform = await run(moodle, ["courses", "--platform", "com.otro.app"]);
     assert.equal(platform.code, 2);
-    assert.match(platform.stderr, /Plataforma desconocida.*ro\.utcluj\.kb/);
-    assert.ok(!platform.stderr.includes("Traza guardada"));
+    assert.match(platform.stderr, /Unknown platform.*ro\.utcluj\.kb/);
+    assert.ok(!platform.stderr.includes("Trace saved"));
     const lang = await run(moodle, ["courses", "--lang", "xx"]);
     assert.equal(lang.code, 2);
-    assert.match(lang.stderr, /Idioma no soportado/);
-    assert.deepEqual((await readdir(work)).filter((n) => n.startsWith("scorm-trace-")), [], "los errores de uso no dejan traza");
+    assert.match(lang.stderr, /Unsupported language/);
+    assert.deepEqual((await readdir(work)).filter((n) => n.startsWith("scorm-trace-")), [], "usage errors leave no trace");
   });
 
-  it("--lang se lee tanto con espacio como con =, y LANG del entorno no soportado cae al español", async () => {
+  it("accepts both --lang forms and uses English in a Spanish environment", async () => {
     const moodle = await server();
-    assert.equal((await run(moodle, ["courses", "--lang=es"])).code, 0);
-    assert.equal((await run(moodle, ["courses", "--lang", "es"])).code, 0);
-    assert.equal((await run(moodle, ["courses"], { LANG: "fr_FR.UTF-8" })).code, 0);
+    assert.equal((await run(moodle, ["courses", "--lang=en"])).code, 0);
+    assert.equal((await run(moodle, ["courses", "--lang", "en"])).code, 0);
+    const fallback = await run(moodle, ["items", "102"], { LANG: "es_ES.UTF-8", SCORM_LANG: "es" });
+    assert.equal(fallback.code, 0, fallback.stderr);
+    assert.match(fallback.stdout, /^Section 0 - General\n/);
   });
 });

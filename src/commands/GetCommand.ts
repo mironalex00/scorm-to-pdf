@@ -13,7 +13,7 @@ export interface Selection {
   readonly items: readonly string[] | undefined;
 }
 
-/** Descarga los contenidos elegidos de un curso (todo, por semanas o por ids) a <destino>/<sección>/. */
+/** Saves selected materials from one course to the destination. */
 export class GetCommand implements Command {
   private readonly catalog: CatalogService;
   private readonly resolver: CourseResolver;
@@ -49,13 +49,14 @@ export class GetCommand implements Command {
     const contents = await this.catalog.contents(course);
     const selected = this.select(contents);
     if (selected.length === 0) throw new UsageError(this.messages.cli.nothingSelected());
-    return this.printer.print(await this.batch.run(selected, this.dest, contents.sections));
+    return this.printer.print(await this.batch.run(selected, this.dest, contents.sections, {
+      allItems: contents.items,
+      groupByItem: false,
+    }));
   }
 
   private select(contents: CourseContents): CourseItem[] {
-    const ordered = this.catalog
-      .sectionsOf(contents)
-      .flatMap((section) => this.catalog.itemsIn(contents, section.number));
+    const ordered = this.catalog.weeks(contents).flatMap(({ items }) => items);
     if (this.selection.all) return ordered;
     return ordered.filter(
       (item) => this.selection.weeks?.includes(item.sectionNumber) || this.selection.items?.includes(item.id),

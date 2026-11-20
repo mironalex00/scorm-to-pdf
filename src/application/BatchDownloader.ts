@@ -10,7 +10,7 @@ export interface BatchReport {
   readonly downloaded: number;
   readonly skipped: number;
   readonly failed: number;
-  /** El lote se detuvo antes de terminar (sesión caducada). */
+  /** True when an expired session stops the batch. */
   readonly aborted: boolean;
 }
 
@@ -20,16 +20,14 @@ interface PoolState {
   aborted: boolean;
 }
 
-/**
- * Descarga una selección con paralelismo acotado. El fallo de un ítem no detiene los demás;
- * una sesión caducada sí, porque todos los siguientes fallarían igual.
- */
+/** Downloads items with bounded concurrency. An authentication failure stops new work. */
 export class BatchDownloader {
   private readonly items: ItemTransfer;
   private readonly planner: NamePlanner;
   private readonly logger: Logger;
   private readonly tracer: Tracer;
   private readonly concurrency: number;
+  private readonly signal: AbortSignal | undefined;
 
   constructor(deps: {
     items: ItemTransfer;
@@ -37,23 +35,30 @@ export class BatchDownloader {
     logger: Logger;
     tracer: Tracer;
     settings: { concurrency: number };
+    signal?: AbortSignal | undefined;
   }) {
     this.items = deps.items;
     this.planner = deps.planner;
     this.logger = deps.logger;
     this.tracer = deps.tracer;
     this.concurrency = deps.settings.concurrency;
+    this.signal = deps.signal;
   }
 
-  async run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[] = [], itemFolders?: { allItems: readonly CourseItem[] }): Promise<BatchReport> {
+  async run(
+    items: readonly CourseItem[], destRoot: string, sections: readonly Section[] = [],
+    naming?: { allItems: readonly CourseItem[]; groupByItem?: boolean },
+  ): Promise<BatchReport> {
     this.tracer.event("info", "download", "batch.start", { total: items.length, concurrency: this.concurrency });
-    const plan = this.planner.plan(itemFolders?.allItems ?? items);
+    const groupByItem = naming?.groupByItem ?? naming !== undefined;
+    const plan = this.planner.plan(naming?.allItems ?? items, groupByItem);
     const folders = this.planner.sectionFolders(sections);
     const slots = new Array<ItemOutcome | undefined>(items.length);
     const state: PoolState = { next: 0, done: 0, aborted: false };
     const workers = Math.min(this.concurrency, items.length);
 
-    await Promise.all(Array.from({ length: workers }, () => this.runWorker(items, plan, folders, destRoot, slots, state, itemFolders !== undefined)));
+    await Promise.all(Array.from({ length: workers }, () => this.runWorker(items, plan, folders, destRoot, slots, state, groupByItem)));
+    this.signal?.throwIfAborted();
 
     const outcomes = slots.filter((outcome): outcome is ItemOutcome => outcome !== undefined);
     const report: BatchReport = {
@@ -81,7 +86,7 @@ export class BatchDownloader {
     state: PoolState,
     groupByItem: boolean,
   ): Promise<void> {
-    while (!state.aborted && state.next < items.length) {
+    while (!this.signal?.aborted && !state.aborted && state.next < items.length) {
       const index = state.next;
       state.next += 1;
       const item = items[index]!;

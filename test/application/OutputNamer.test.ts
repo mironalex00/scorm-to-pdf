@@ -5,42 +5,42 @@ import { OutputNamer } from "../../src/application/OutputNamer.ts";
 const namer = new OutputNamer({ maxStemLength: 20 });
 
 describe("OutputNamer", () => {
-  it("usa lo que precede al primer '. ' del título: «AFSD · Curs 5. Funcții…» → AFSD-Curs-5.pdf", () => {
+  it("uses the title up to the first period followed by a space", () => {
     const name = namer.name({ title: "AFSD · Curs 5. Funcții și descompunerea problemelor", scormId: 10067 });
     assert.equal(name, "AFSD-Curs-5.pdf");
   });
 
-  it("usa el título completo cuando no hay '. '", () => {
+  it("uses the whole title when there is no sentence break", () => {
     assert.equal(namer.name({ title: "Curs 5", scormId: 1 }), "Curs-5.pdf");
     assert.equal(namer.name({ title: "AFSD · Curs 5.", scormId: 1 }), "AFSD-Curs-5.pdf");
   });
 
-  it("quita diacríticos para que el nombre sea portable", () => {
+  it("removes diacritics from the filename", () => {
     assert.equal(namer.name({ title: "Algoritmi și structuri", scormId: 1 }), "Algoritmi-si-structu.pdf");
   });
 
-  it("neutraliza intentos de recorrer directorios o inyectar separadores", () => {
+  it("removes path separators from the filename", () => {
     assert.equal(namer.name({ title: "../../etc/passwd", scormId: 1 }), "etc-passwd.pdf");
     assert.equal(namer.name({ title: "a\\b:c*d?\u0000e", scormId: 1 }), "a-b-c-d-e.pdf");
   });
 
-  it("recorta a la longitud máxima sin dejar un guion final", () => {
+  it("truncates the filename stem and removes a trailing hyphen", () => {
     const name = namer.name({ title: "abcdefghijklmnopqrs tuvwxyz", scormId: 1 });
     assert.equal(name, "abcdefghijklmnopqrs.pdf");
     assert.equal(namer.name({ title: "abcdefghijklmnopqrs-tuvwxyz", scormId: 1 }), "abcdefghijklmnopqrs.pdf");
   });
 
-  it("si lo que precede al primer '. ' queda vacío, usa el título completo", () => {
+  it("uses the whole title when the first sentence is empty", () => {
     assert.equal(namer.name({ title: ". Intro", scormId: 1 }), "Intro.pdf");
   });
 
   const fallbacks: Array<[string, string | undefined]> = [
-    ["sin título", undefined],
-    ["título vacío", ""],
-    ["título solo con símbolos", "·· ** ··"],
+    ["the title is missing", undefined],
+    ["the title is empty", ""],
+    ["the title contains only symbols", "·· ** ··"],
   ];
   for (const [name, title] of fallbacks) {
-    it(`recurre a scorm-<id>.pdf con ${name}`, () => {
+    it(`uses scorm-<id>.pdf when ${name}`, () => {
       assert.equal(namer.name({ title, scormId: 10067 }), "scorm-10067.pdf");
     });
   }

@@ -3,7 +3,7 @@ export interface JpegSpec {
   readonly height: number;
   readonly components?: 1 | 3 | 4;
   readonly progressive?: boolean;
-  /** Bytes que se insertan justo antes del marcador SOF (relleno, marcadores sin longitud…). */
+  /** Optional padding and standalone markers before the frame header. */
   readonly beforeFrame?: readonly number[];
 }
 
@@ -11,10 +11,7 @@ function u16(value: number): number[] {
   return [(value >> 8) & 0xff, value & 0xff];
 }
 
-/**
- * JPEG sintético: solo tiene la estructura de marcadores que el inspector necesita
- * (SOI, APP0, SOF, SOS, EOI). No se puede decodificar, pero sí incrustar en un PDF.
- */
+/** A marker-only fixture for parser tests. Image decoders require a complete JPEG. */
 export function makeJpeg(spec: JpegSpec): Uint8Array {
   const components = spec.components ?? 3;
   const sof = [

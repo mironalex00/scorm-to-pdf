@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { CourseItem, Section } from "../../src/domain/catalog.ts";
-import { es } from "../../src/i18n/es.ts";
+import { en } from "../../src/i18n/en.ts";
 import { FrameLayout } from "../../src/tui/FrameLayout.ts";
 import { ItemSelectionScreen } from "../../src/tui/screens/ItemSelectionScreen.ts";
 import { ListScreen } from "../../src/tui/screens/ListScreen.ts";
@@ -20,7 +20,7 @@ function press<T>(screen: { press(k: KeyPress): ScreenResult<T> }, ...keys: KeyP
 }
 
 describe("FrameLayout", () => {
-  it("compone título, subtítulo, cuerpo y pie con el cuerpo rellenado hasta la altura disponible", () => {
+  it("composes the header, body, and footer and fills the available body rows", () => {
     const frame = layout.compose({ title: "Título", subtitle: "sub", body: ["uno", "dos"], footer: "pie", size });
     assert.equal(frame.length, 12 - 5 + 5);
     assert.deepEqual([frame[0], frame[1]], ["Título", "sub"]);
@@ -28,14 +28,14 @@ describe("FrameLayout", () => {
     assert.ok(frame[2]!.startsWith("─") && frame.at(-2)!.startsWith("─"));
   });
 
-  it("trunca las líneas largas al ancho con puntos suspensivos y descarta lo que no cabe en el cuerpo", () => {
+  it("truncates long lines and limits the body to the available height", () => {
     const long = "x".repeat(100);
     const frame = layout.compose({ title: long, body: Array.from({ length: 50 }, (_, i) => `fila ${i}`), footer: "", size });
     assert.equal(frame[0], `${"x".repeat(38)}…`);
     assert.equal(frame.length, 12);
   });
 
-  it("con color resalta la fila elegida en vídeo inverso y el título en negrita; sin color no añade secuencias", () => {
+  it("applies reverse video and bold when color is enabled", () => {
     const colored = new FrameLayout({ colors: true });
     assert.equal(colored.highlight("a"), "\x1b[7ma\x1b[0m");
     assert.equal(colored.bold("a"), "\x1b[1ma\x1b[0m");
@@ -48,13 +48,13 @@ describe("ListScreen", () => {
   const items = ["Alfa", "Beta", "Gama", "Delta", "Épsilon", "Zeta", "Eta", "Theta", "Iota", "Kappa"].map((label) => ({ label, value: label }));
   const make = () => new ListScreen({ title: "Cursos", footer: "pie", items, emptyMessage: "vacío", layout });
 
-  it("marca la fila actual y entrega su valor con Enter", () => {
+  it("highlights the current row and returns its value on Enter", () => {
     const screen = make();
     assert.match(screen.render(size).join("\n"), /> Alfa/);
     assert.deepEqual(press(screen, key("down"), key("down"), key("enter")), { kind: "done", value: "Gama" });
   });
 
-  it("no pasa de los extremos y salta con Re Pág, Av Pág, Inicio y Fin", () => {
+  it("stays within the list bounds and handles page and endpoint navigation", () => {
     const screen = make();
     press(screen, key("up"));
     assert.match(screen.render(size).join("\n"), /> Alfa/);
@@ -70,21 +70,21 @@ describe("ListScreen", () => {
     assert.match(screen.render(size).join("\n"), /> Alfa/);
   });
 
-  it("desplaza la ventana para que la fila actual siempre sea visible", () => {
+  it("scrolls to keep the current row visible", () => {
     const screen = make();
     press(screen, key("end"));
     const text = screen.render(size).join("\n");
     assert.ok(text.includes("Kappa") && !text.includes("Alfa"));
   });
 
-  it("Esc y q vuelven; Ctrl+C cancela; otras teclas se ignoran", () => {
+  it("goes back on Escape or q and cancels on Ctrl+C", () => {
     assert.equal(press(make(), key("escape")).kind, "back");
     assert.equal(press(make(), ...chars("q")).kind, "back");
     assert.equal(press(make(), key("ctrl-c")).kind, "cancel");
     assert.equal(press(make(), ...chars("z"), key("left")).kind, "stay");
   });
 
-  it("una lista vacía muestra su aviso y Enter no hace nada", () => {
+  it("shows the empty-list message and ignores Enter", () => {
     const screen = new ListScreen<string>({ title: "t", footer: "f", items: [], emptyMessage: "No hay nada", layout });
     assert.match(screen.render(size).join("\n"), /No hay nada/);
     assert.equal(press(screen, key("enter")).kind, "stay");
@@ -99,20 +99,20 @@ describe("ItemSelectionScreen", () => {
     { section: sections[1]!, items: [item("b", "Curs 5", 1, "scorm"), item("c", "Ejercicios", 1)] },
     { section: sections[2]!, items: [item("d", "Extra", 2)] },
   ];
-  const make = (marked: string[] = []) => new ItemSelectionScreen({ title: "Curso", weeks, marked: new Set(marked), layout, messages: es });
+  const make = (marked: string[] = []) => new ItemSelectionScreen({ title: "Curso", weeks, marked: new Set(marked), layout, messages: en });
   const text = (screen: ItemSelectionScreen) => screen.render({ columns: 60, rows: 20 }).join("\n");
 
-  it("agrupa los contenidos por semana, de menor a mayor, con su tipo y casillas", () => {
+  it("groups materials by section and shows their types and checkboxes", () => {
     const rendered = text(make(["b"]));
-    assert.ok(rendered.indexOf("Semana 0 — General") < rendered.indexOf("Semana 1 — Semana uno"));
-    assert.ok(rendered.includes("Semana 2\n") || rendered.includes("Semana 2 "));
+    assert.ok(rendered.indexOf("Section 0 - General") < rendered.indexOf("Section 1 - Semana uno"));
+    assert.match(rendered, /^Section 2$/m);
     assert.match(rendered, /\[ \] Programa/);
     assert.match(rendered, /\[x\] Curs 5 {2}\(scorm\)/);
-    assert.match(rendered, /\[ \] Ejercicios {2}\(recurso\)/);
-    assert.match(rendered, /1 seleccionados/);
+    assert.match(rendered, /\[ \] Ejercicios {2}\(resource\)/);
+    assert.match(rendered, /1 selected/);
   });
 
-  it("Espacio marca y desmarca el contenido bajo el cursor", () => {
+  it("toggles the current item with Space", () => {
     const screen = make();
     press(screen, key("down"), key("space"));
     assert.match(text(screen), /> \[x\] Curs 5/);
@@ -120,7 +120,7 @@ describe("ItemSelectionScreen", () => {
     assert.match(text(screen), /> \[ \] Curs 5/);
   });
 
-  it("a marca toda la semana del cursor y, si ya estaba completa, la desmarca; A hace lo mismo con todo", () => {
+  it("toggles all items in the current week with a and all course items with A", () => {
     const screen = make();
     press(screen, key("down"), ...chars("a"));
     assert.match(text(screen), /\[x\] Curs 5[\s\S]*\[x\] Ejercicios/);
@@ -133,16 +133,16 @@ describe("ItemSelectionScreen", () => {
     assert.equal((text(screen).match(/\[x\]/g) ?? []).length, 0);
   });
 
-  it("Enter sin nada marcado avisa y se queda; con selección entrega los contenidos en orden", () => {
+  it("requires at least one checked item and returns the checked items in order", () => {
     const screen = make();
     assert.equal(press(screen, key("enter")).kind, "stay");
-    assert.match(text(screen), /Marca al menos un contenido/);
+    assert.match(text(screen), /Press Space to select at least one item/);
     const result = press(screen, key("down"), key("down"), key("space"), key("up"), key("space"), key("enter"));
     assert.equal(result.kind, "done");
     assert.deepEqual(result.kind === "done" && result.value.map((i) => i.id), ["b", "c"]);
   });
 
-  it("recuerda la selección previa y navega por extremos y páginas", () => {
+  it("restores checked items and handles page and endpoint navigation", () => {
     const screen = make(["d"]);
     press(screen, key("end"));
     assert.match(text(screen), /> \[x\] Extra/);
@@ -154,16 +154,16 @@ describe("ItemSelectionScreen", () => {
     assert.match(text(screen), /> \[ \] Programa/);
   });
 
-  it("Esc y q vuelven, Ctrl+C cancela, el resto se ignora", () => {
+  it("goes back on Escape or q and cancels on Ctrl+C", () => {
     assert.equal(press(make(), key("escape")).kind, "back");
     assert.equal(press(make(), ...chars("q")).kind, "back");
     assert.equal(press(make(), key("ctrl-c")).kind, "cancel");
     assert.equal(press(make(), key("left")).kind, "stay");
   });
 
-  it("un curso sin contenido lo dice y solo permite volver", () => {
-    const empty = new ItemSelectionScreen({ title: "Curso", weeks: [], marked: new Set(), layout, messages: es });
-    assert.match(text(empty), /no tiene contenido descargable/);
+  it("shows the empty-course message and allows the user to go back", () => {
+    const empty = new ItemSelectionScreen({ title: "Curso", weeks: [], marked: new Set(), layout, messages: en });
+    assert.match(text(empty), /has no downloadable materials/);
     assert.deepEqual([press(empty, key("enter")).kind, press(empty, key("space")).kind, press(empty, ...chars("a")).kind], ["stay", "stay", "stay"]);
     assert.equal(press(empty, key("escape")).kind, "back");
   });
@@ -173,7 +173,7 @@ describe("ReviewScreen", () => {
   const lines = Array.from({ length: 30 }, (_, i) => `línea ${i}`);
   const make = (anyKey: boolean) => new ReviewScreen({ title: "Revisar", footer: "pie", lines, anyKey, layout });
 
-  it("Enter acepta, Esc vuelve, Ctrl+C cancela, y se desplaza con las flechas y las páginas", () => {
+  it("confirms on Enter, goes back on Escape, and handles scrolling and cancellation", () => {
     const screen = make(false);
     assert.ok(!screen.render(size).join("\n").includes("línea 20"));
     press(screen, key("down"), key("pagedown"), key("pagedown"), key("pagedown"), key("pagedown"));
@@ -188,7 +188,7 @@ describe("ReviewScreen", () => {
     assert.equal(press(make(false), key("tab")).kind, "stay");
   });
 
-  it("en modo cualquier tecla, cualquiera que no sea de desplazamiento termina", () => {
+  it("confirms on a non-scrolling key in any-key mode", () => {
     assert.equal(press(make(true), key("down")).kind, "stay");
     for (const k of [key("enter"), key("escape"), key("space"), ...chars("x")]) assert.equal(press(make(true), k).kind, "done");
     assert.equal(press(make(true), key("ctrl-c")).kind, "cancel");
@@ -198,24 +198,24 @@ describe("ReviewScreen", () => {
 describe("TextPromptScreen", () => {
   const make = (mask = false, initial = "") => new TextPromptScreen({ title: "Ruta", lines: ["instrucciones"], label: "Ruta:", mask, initial, footer: "pie", layout });
 
-  it("escribe, borra y entrega el texto recortado con Enter", () => {
+  it("accepts text, handles backspace, and trims the submitted value", () => {
     const screen = make();
     press(screen, ...chars("mi carpeta  "), key("backspace"), key("backspace"));
     assert.match(screen.render(size).join("\n"), /Ruta: mi carpeta▌/);
     assert.deepEqual(press(screen, key("enter")), { kind: "done", value: "mi carpeta" });
   });
 
-  it("Enter con el campo vacío no acepta; Backspace sobre vacío no falla", () => {
+  it("ignores Enter and Backspace when the field is empty", () => {
     const screen = make();
     assert.equal(press(screen, key("backspace"), key("enter")).kind, "stay");
   });
 
-  it("parte del valor inicial y muestra las instrucciones", () => {
+  it("shows the initial value and instructions", () => {
     const screen = make(false, "./material");
     assert.match(screen.render(size).join("\n"), /instrucciones[\s\S]*Ruta: \.\/material▌/);
   });
 
-  it("con máscara oculta lo escrito y solo muestra cuántos caracteres hay", () => {
+  it("masks the entered text and displays its length", () => {
     const screen = make(true);
     press(screen, ...chars("secreto"));
     const rendered = screen.render(size).join("\n");
@@ -225,7 +225,7 @@ describe("TextPromptScreen", () => {
     assert.match(screen.render({ columns: 80, rows: 12 }).join("\n"), /Ruta: •{40}… \(67\)▌/);
   });
 
-  it("Esc vuelve, Ctrl+C cancela y las teclas de navegación se ignoran", () => {
+  it("goes back on Escape, cancels on Ctrl+C, and ignores navigation keys", () => {
     assert.equal(press(make(), key("escape")).kind, "back");
     assert.equal(press(make(), key("ctrl-c")).kind, "cancel");
     assert.equal(press(make(), key("up"), key("tab")).kind, "stay");

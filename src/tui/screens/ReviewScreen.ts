@@ -3,7 +3,7 @@ import type { KeyPress, Screen, ScreenResult, TerminalSize } from "../Terminal.t
 
 const DEFAULT_PAGE = 5;
 
-/** Texto desplazable: confirma con Enter (o con cualquier tecla, si `anyKey`) y permite volver con Esc. */
+/** Scrollable confirmation that accepts Enter or any key, depending on the screen. */
 export class ReviewScreen implements Screen<true> {
   private readonly title: string;
   private readonly subtitle: string;

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { CourseItem } from "../domain/catalog.ts";
 
 const RESERVED_WINDOWS_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const FILE_EXTENSION = /\.[A-Za-z0-9]{1,8}$/;
 const EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
   "application/pdf": ".pdf",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
@@ -10,7 +11,7 @@ const EXTENSION_BY_TYPE: Readonly<Record<string, string>> = {
   "application/zip": ".zip",
 };
 
-/** Nombres de archivo seguros en macOS, Linux y Windows, conservando acentos y legibilidad. */
+/** Normalizes file and directory names while preserving accents. */
 export class FileNamer {
   private readonly fallbackName: string;
   private readonly maxNameBytes: number;
@@ -48,17 +49,29 @@ export class FileNamer {
     return String(sectionNumber);
   }
 
-  directoryNames<Key>(entries: Iterable<readonly [Key, string]>): Map<Key, string> {
+  directoryNames<Key>(entries: Iterable<readonly [Key, string]>, reserveExtensions = false): Map<Key, string> {
     const names = new Map<Key, string>();
     const used = new Set<string>();
+    const stems = new Set<string>();
+    const nextSuffix = new Map<string, number>();
+    const collides = (value: string) => {
+      const lower = value.toLowerCase();
+      return used.has(lower) || (reserveExtensions && (stems.has(lower) || used.has(lower.replace(FILE_EXTENSION, ""))));
+    };
     for (const [key, title] of entries) {
       const base = this.baseName(title);
+      const baseKey = base.toLowerCase();
       let folder = base;
-      for (let suffix = 2; used.has(folder.toLowerCase()); suffix += 1) {
+      let suffix = nextSuffix.get(baseKey) ?? 2;
+      while (collides(folder)) {
         folder = `${base} (${suffix})`;
+        suffix += 1;
       }
+      nextSuffix.set(baseKey, suffix);
       names.set(key, folder);
-      used.add(folder.toLowerCase());
+      const lower = folder.toLowerCase();
+      used.add(lower);
+      if (reserveExtensions) stems.add(lower.replace(FILE_EXTENSION, ""));
     }
     return names;
   }
@@ -68,10 +81,10 @@ export class FileNamer {
   }
 
   private extensionFor(sourceFileName: string, contentType: string | undefined): string {
-    const fromSource = /\.[A-Za-z0-9]{1,8}$/.exec(sourceFileName)?.[0];
+    const fromSource = FILE_EXTENSION.exec(sourceFileName)?.[0];
     if (fromSource) return fromSource;
     const type = (contentType ?? "").split(";")[0]!.trim().toLowerCase();
-    return EXTENSION_BY_TYPE[type] ?? "";
+    return Object.hasOwn(EXTENSION_BY_TYPE, type) ? EXTENSION_BY_TYPE[type]! : "";
   }
 
   private truncate(name: string): string {

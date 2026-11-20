@@ -4,7 +4,7 @@ export interface DeckSlideInput {
   readonly text?: string;
 }
 
-/** Reproduce la estructura del index.html real: `const SLIDES = [...]; const N = SLIDES.length;`. */
+/** Matches the slide array and count declarations in a SCORM entry document. */
 export function buildDeckHtml(options: { title?: string; slides: readonly DeckSlideInput[] }): string {
   const titleTag = options.title === undefined ? "" : `<title>${options.title}</title>`;
   const slides = options.slides.map((slide) => ({ links: [], ...slide }));

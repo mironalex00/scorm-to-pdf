@@ -2,7 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { HtmlParser } from "../../../src/html/HtmlParser.ts";
 import { AuthenticationError, PlatformError } from "../../../src/domain/errors.ts";
-import { es } from "../../../src/i18n/es.ts";
+import { en } from "../../../src/i18n/en.ts";
 import { CourseIndexParser } from "../../../src/platforms/moodle/CourseIndexParser.ts";
 import { CourseListParser } from "../../../src/platforms/moodle/CourseListParser.ts";
 import { MoodlePlatform } from "../../../src/platforms/moodle/MoodlePlatform.ts";
@@ -27,9 +27,9 @@ function make(http: FakeHttpClient, paths: readonly string[] = profile.contentsP
     profile: { ...profile, contentsPaths: paths },
     session: stack.session,
     tracer: stack.tracer,
-    messages: es,
+    messages: en,
     sesskeys: new SesskeyExtractor(),
-    courseList: new CourseListParser({ messages: es }),
+    courseList: new CourseListParser({ messages: en }),
     courseIndex: new CourseIndexParser({ html: new HtmlParser() }),
     resources: { fetch: async (item: CourseItem) => (calls.push(`resource:${item.id}`), fileResult) },
     scorms: { fetch: async (item: CourseItem) => (calls.push(`scorm:${item.id}`), slidesResult) },
@@ -38,8 +38,8 @@ function make(http: FakeHttpClient, paths: readonly string[] = profile.contentsP
 }
 const item = (kind: "resource" | "scorm"): CourseItem => ({ id: "7", kind, name: "n", url: "https://moodle.example.org/x", sectionNumber: 1 });
 
-describe("MoodlePlatform · cursos", () => {
-  it("obtiene el sesskey de my/courses.php y lista los cursos con la llamada AJAX descrita", async () => {
+describe("MoodlePlatform course listing", () => {
+  it("reads the session key from my/courses.php and makes the course-list AJAX request", async () => {
     const http = new FakeHttpClient().on(PAGE, okResponse(coursesPage())).on(SERVICE, okResponse(coursesJson([{ id: 7, fullname: "Algoritmi" }]), "application/json"));
     const { platform } = make(http);
     assert.deepEqual(await platform.listCourses(), [{ id: "7", name: "Algoritmi" }]);
@@ -57,7 +57,7 @@ describe("MoodlePlatform · cursos", () => {
     }]);
   });
 
-  it("el sesskey y la cookie nunca aparecen en la traza ni en las capturas", async () => {
+  it("redacts the session key and cookie from events and snapshots", async () => {
     const http = new FakeHttpClient().on(PAGE, okResponse(coursesPage())).on(SERVICE, okResponse(coursesJson([{ id: 7, fullname: "A" }])));
     const { platform, sink, tracer } = make(http, profile.contentsPaths, true);
     tracer.addSecret("cookie-value-123");
@@ -67,28 +67,28 @@ describe("MoodlePlatform · cursos", () => {
     assert.ok(sink.snapshots.some((s) => s.name === "courses-page"));
   });
 
-  it("sin sesskey falla indicando el título de la página", async () => {
+  it("includes the page title when the session key is missing", async () => {
     const http = new FakeHttpClient().on(PAGE, okResponse("<html><title>Rara</title></html>"));
     const error = await rejection(make(http).platform.listCourses());
     assert.ok(error instanceof PlatformError);
     assert.match(error.message, /Rara/);
   });
 
-  it("sin sesskey y sin título en la página lo indica como «sin título»", async () => {
+  it("uses the untitled label when the page has no title or session key", async () => {
     const http = new FakeHttpClient().on(PAGE, okResponse("<html><body>nada</body></html>"));
-    assert.match((await rejection(make(http).platform.listCourses())).message, /sin título/);
+    assert.match((await rejection(make(http).platform.listCourses())).message, /untitled/);
   });
 
-  it("una sesión no válida en la página de cursos es un error de autenticación", async () => {
+  it("reports an authentication error when the course list shows a sign-in page", async () => {
     const http = new FakeHttpClient().on(PAGE, redirectResponse("/login/index.php"));
     assert.ok((await rejection(make(http).platform.listCourses())) instanceof AuthenticationError);
   });
 });
 
-describe("MoodlePlatform · contenido de un curso", () => {
+describe("MoodlePlatform course contents", () => {
   const url = (path: string) => `https://moodle.example.org/${path}`;
 
-  it("prueba las rutas por orden y se queda con la primera que contiene materiales", async () => {
+  it("tries candidate paths in order and returns the first with materials", async () => {
     const http = new FakeHttpClient()
       .on(url("course/section.php?id=101"), statusResponse(404))
       .on(url("course/view.php?id=101"), okResponse(COURSE_INDEX));
@@ -98,7 +98,7 @@ describe("MoodlePlatform · contenido de un curso", () => {
     assert.deepEqual(events().filter((e) => e.name === "contents.attempt").map((e) => e.data?.outcome), ["error", "ok"]);
   });
 
-  it("una página sin secciones pasa a la siguiente ruta", async () => {
+  it("tries the next path when a page has no sections", async () => {
     const http = new FakeHttpClient()
       .on(url("a/101"), okResponse("<html>vacía</html>"))
       .on(url("b/101"), okResponse(COURSE_INDEX));
@@ -107,7 +107,7 @@ describe("MoodlePlatform · contenido de un curso", () => {
     assert.equal(events().find((e) => e.name === "contents.attempt")?.data?.outcome, "empty");
   });
 
-  it("una página con secciones pero sin materiales pasa a la siguiente ruta", async () => {
+  it("tries the next path when a page has sections but no materials", async () => {
     const http = new FakeHttpClient()
       .on(url("a/101"), okResponse('<li data-for="section" data-number="1" data-sectionname="Tema"></li>'))
       .on(url("b/101"), okResponse(COURSE_INDEX));
@@ -116,7 +116,7 @@ describe("MoodlePlatform · contenido de un curso", () => {
     assert.deepEqual(events().filter((e) => e.name === "contents.attempt").map((e) => e.data?.outcome), ["empty", "ok"]);
   });
 
-  it("devuelve un curso con secciones sin materiales cuando ninguna ruta los tiene", async () => {
+  it("returns empty sections when no candidate path contains materials", async () => {
     const http = new FakeHttpClient()
       .on(url("a/101"), okResponse('<li data-for="section" data-number="1" data-sectionname="Tema"></li>'))
       .on(url("b/101"), statusResponse(404));
@@ -127,22 +127,22 @@ describe("MoodlePlatform · contenido de un curso", () => {
     });
   });
 
-  it("si ninguna ruta sirve lista los intentos en el error", async () => {
+  it("lists attempted paths when none can load the course", async () => {
     const http = new FakeHttpClient().on(url("a/101"), okResponse("<html></html>")).on(url("b/101"), statusResponse(404));
     const error = await rejection(make(http, ["a/{courseId}", "b/{courseId}"]).platform.loadContents(COURSE));
     assert.ok(error instanceof PlatformError);
-    assert.match(error.message, /«Algoritmi».*a\/\{courseId\}.*b\/\{courseId\}/);
+    assert.match(error.message, /"Algoritmi".*a\/\{courseId\}.*b\/\{courseId\}/);
   });
 
-  it("un error de sesión no se reintenta con otra ruta", async () => {
+  it("stops trying alternate paths on an authentication error", async () => {
     const http = new FakeHttpClient().on(url("a/101"), redirectResponse("/login/index.php"));
     assert.ok((await rejection(make(http, ["a/{courseId}", "b/{courseId}"]).platform.loadContents(COURSE))) instanceof AuthenticationError);
     assert.equal(http.requests.length, 1);
   });
 });
 
-describe("MoodlePlatform · ítems", () => {
-  it("delega cada tipo en su resolvedor", async () => {
+describe("MoodlePlatform item retrieval", () => {
+  it("dispatches each item to its matching fetcher", async () => {
     const { platform } = make(new FakeHttpClient());
     assert.equal(await platform.fetchItem(item("resource")), fileResult);
     assert.equal(await platform.fetchItem(item("scorm")), slidesResult);

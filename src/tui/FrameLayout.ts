@@ -1,10 +1,11 @@
+import { plainLine } from "../infra/plainText.ts";
 import type { TerminalSize } from "./Terminal.ts";
 
 const HEADER_LINES = 3;
 const FOOTER_LINES = 2;
 const MIN_BODY = 3;
 
-/** Marco común de todas las pantallas: título, subtítulo, regla, cuerpo, regla y pie. */
+/** Shared layout for the interactive screens. */
 export class FrameLayout {
   private readonly colors: boolean;
 
@@ -31,16 +32,17 @@ export class FrameLayout {
     ];
   }
 
-  /** Una fila del cuerpo ya ajustada al ancho y, si está elegida, resaltada. */
+  /** Fits a row and highlights it when selected. */
   row(text: string, size: TerminalSize, selected: boolean): string {
     const fitted = this.fit(text, size);
     return selected ? this.highlight(fitted) : fitted;
   }
 
-  /** Recorta al ancho útil (una columna menos, para no provocar saltos de línea automáticos). */
+  /** Leaves one column free to avoid automatic line wrapping. */
   fit(text: string, size: TerminalSize): string {
     const limit = Math.max(2, size.columns - 1);
-    return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+    const plain = plainLine(text);
+    return plain.length > limit ? `${plain.slice(0, limit - 1)}…` : plain;
   }
 
   highlight(text: string): string {

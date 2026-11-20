@@ -6,7 +6,7 @@ import type { SlidesToPdf } from "./SlidesToPdf.ts";
 
 export interface DownloadTarget {
   readonly destRoot: string;
-  /** Nombre sin extensión, ya saneado y sin duplicados (lo decide el NamePlanner). */
+  /** Sanitized name assigned by the planner, before the source extension is resolved. */
   readonly baseName: string;
   readonly sectionFolder?: string;
   readonly groupByItem?: boolean;
@@ -21,10 +21,7 @@ export interface ItemTransfer {
   download(item: CourseItem, target: DownloadTarget): Promise<ItemOutcome>;
 }
 
-/**
- * Descarga un ítem elegido. La resolución del enlace real se hace aquí, al descargar, no al listar:
- * un archivo directo se guarda tal cual y un SCORM de diapositivas pasa por el flujo de conversión a PDF.
- */
+/** Resolves selected materials and writes either the original file or a converted PDF. */
 export class ItemDownloader implements ItemTransfer {
   private readonly platform: LearningPlatform;
   private readonly slides: SlidesToPdf;
@@ -49,34 +46,33 @@ export class ItemDownloader implements ItemTransfer {
   download(item: CourseItem, target: DownloadTarget): Promise<ItemOutcome> {
     const tracer = this.tracer.with({ item: item.id });
     return tracer.span("download", "item", { name: item.name, kind: item.kind, section: item.sectionNumber }, async () => {
+      const itemFolder = target.groupByItem ? target.baseName : "";
+      const output = (fileName: string) => this.namer.itemPath(target.destRoot, item, fileName, target.sectionFolder, itemFolder);
+      const skipped = (path: string) => {
+        tracer.event("info", "download", "skipped.exists", { path });
+        return { item, status: "skipped", path } as const;
+      };
+      const pdfPath = output(this.namer.fileName({ baseName: target.baseName, sourceFileName: "", contentType: undefined, forcedExtension: ".pdf" }));
+      if (item.kind === "scorm" && await this.sink.exists(pdfPath)) return skipped(pdfPath);
+
       const fetched = await this.platform.fetchItem(item);
-      let fileName: string;
+      let path: string;
       let content: Uint8Array;
       if (fetched.kind === "file") {
-        fileName = this.namer.fileName({
+        path = output(this.namer.fileName({
           baseName: target.baseName,
           sourceFileName: fetched.fileName,
           contentType: fetched.contentType,
-        });
+        }));
         content = fetched.bytes;
       } else {
-        const rendered = await this.slides.render(this.slides.parse(fetched.html), fetched.entryUrl);
-        fileName = this.namer.fileName({
-          baseName: target.baseName,
-          sourceFileName: "",
-          contentType: undefined,
-          forcedExtension: ".pdf",
-        });
-        content = rendered.pdf;
+        path = pdfPath;
+        content = (await this.slides.render(this.slides.parse(fetched.html), fetched.entryUrl)).pdf;
       }
 
-      const path = this.namer.itemPath(target.destRoot, item, fileName, target.sectionFolder, target.groupByItem ? target.baseName : "");
-      if (await this.sink.exists(path)) {
-        tracer.event("info", "download", "skipped.exists", { path });
-        return { item, status: "skipped", path };
-      }
-      const written = await this.sink.write(path, content);
-      return { item, status: "downloaded", path: written, bytes: content.length };
+      if (fetched.kind === "file" && await this.sink.exists(path)) return skipped(path);
+      const written = await this.sink.writeIfAbsent(path, content);
+      return written === undefined ? skipped(path) : { item, status: "downloaded", path: written, bytes: content.length };
     });
   }
 }

@@ -7,7 +7,7 @@ export interface CommonOptions {
   readonly quiet: boolean;
 }
 
-/** Opciones adicionales para las órdenes que consultan Moodle. */
+/** Options used by commands that access Moodle. */
 export interface GlobalOptions extends CommonOptions {
   readonly platform: string | undefined;
   readonly baseUrl: URL | undefined;

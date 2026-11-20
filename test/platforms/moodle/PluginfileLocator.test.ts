@@ -8,48 +8,48 @@ const SCORM = /\/pluginfile\.php\/\d+\/mod_scorm\/content\/\d+\/[^\s"'<>)]+/;
 
 describe("PluginfileLocator", () => {
   const cases: Array<[string, string, string]> = [
-    ["una URL absoluta entre comillas", `<a href="https://h.example/pluginfile.php/5/x/a.pdf">`, "https://h.example/pluginfile.php/5/x/a.pdf"],
-    ["una ruta sin dominio", `<a href="/pluginfile.php/5/x/a.pdf">`, "/pluginfile.php/5/x/a.pdf"],
-    ["conserva el prefijo de instalación (/moodle)", `url('https://h.example/moodle/pluginfile.php/5/a.pdf')`, "https://h.example/moodle/pluginfile.php/5/a.pdf"],
-    ["se detiene en = y ;", `content="0;url=https://h.example/pluginfile.php/5/a.pdf"`, "https://h.example/pluginfile.php/5/a.pdf"],
-    ["se detiene en un punto y coma sin = delante", `x;https://h.example/pluginfile.php/5/a.pdf`, "https://h.example/pluginfile.php/5/a.pdf"],
-    ["se detiene en espacios y paréntesis", `abrir (https://h.example/pluginfile.php/5/a.pdf) ya`, "https://h.example/pluginfile.php/5/a.pdf"],
-    ["se detiene en una coma", `x,/moodle/pluginfile.php/5/a.pdf`, "/moodle/pluginfile.php/5/a.pdf"],
+    ["in a quoted absolute reference", `<a href="https://h.example/pluginfile.php/5/x/a.pdf">`, "https://h.example/pluginfile.php/5/x/a.pdf"],
+    ["in a path without a host", `<a href="/pluginfile.php/5/x/a.pdf">`, "/pluginfile.php/5/x/a.pdf"],
+    ["under the Moodle installation path", `url('https://h.example/moodle/pluginfile.php/5/a.pdf')`, "https://h.example/moodle/pluginfile.php/5/a.pdf"],
+    ["after the equals sign in a refresh directive", `content="0;url=https://h.example/pluginfile.php/5/a.pdf"`, "https://h.example/pluginfile.php/5/a.pdf"],
+    ["after a semicolon", `x;https://h.example/pluginfile.php/5/a.pdf`, "https://h.example/pluginfile.php/5/a.pdf"],
+    ["inside parentheses", `abrir (https://h.example/pluginfile.php/5/a.pdf) ya`, "https://h.example/pluginfile.php/5/a.pdf"],
+    ["after a comma", `x,/moodle/pluginfile.php/5/a.pdf`, "/moodle/pluginfile.php/5/a.pdf"],
   ];
   for (const [name, text, expected] of cases) {
-    it(`localiza ${name}`, () => assert.equal(locator.locate(text, ANY), expected));
+    it(`finds the URL ${name}`, () => assert.equal(locator.locate(text, ANY), expected));
   }
 
-  it("aplica el patrón indicado (p. ej. solo contenido SCORM)", () => {
+  it("applies the supplied pattern to find SCORM content", () => {
     const text = `/pluginfile.php/1/mod_resource/content/1/a.pdf y https://h/pluginfile.php/10067/mod_scorm/content/3/index.html`;
     assert.equal(locator.locate(text, SCORM), "https://h/pluginfile.php/10067/mod_scorm/content/3/index.html");
   });
 
-  it("devuelve undefined si no hay ninguna referencia", () => {
+  it("returns undefined when no reference is present", () => {
     assert.equal(locator.locate("<html>nada</html>", ANY), undefined);
   });
 
-  it("limita cuánto retrocede buscando el inicio de la URL", () => {
+  it("limits how far it looks back for the start of a URL", () => {
     const text = `${"a".repeat(200)}/pluginfile.php/5/a.pdf`;
     assert.equal(locator.locate(text, ANY), `${"a".repeat(64)}/pluginfile.php/5/a.pdf`);
   });
 
-  it("el principio del texto también es un límite", () => {
+  it("handles a reference at the start of the text", () => {
     assert.equal(locator.locate("/pluginfile.php/5/a.pdf", ANY), "/pluginfile.php/5/a.pdf");
   });
 
-  describe("rendimiento con páginas patológicas (regresión: antes era cuadrático)", () => {
+  describe("PluginfileLocator performance regression", () => {
     const inputs: Array<[string, string]> = [
-      ["50 000 «http://» seguidos", "http://".repeat(50_000)],
-      ["40 000 «http://a» seguidos", "http://a".repeat(40_000)],
-      ["una URL de 300 000 caracteres", `http://x/${"a".repeat(300_000)}`],
+      ["50,000 consecutive http:// prefixes", "http://".repeat(50_000)],
+      ["40,000 consecutive http://a prefixes", "http://a".repeat(40_000)],
+      ["a 300,000-character URL", `http://x/${"a".repeat(300_000)}`],
     ];
     for (const [name, input] of inputs) {
-      it(`resuelve en menos de medio segundo ${name}`, () => {
+      it(`finds a reference in under 500 ms with ${name}`, () => {
         const started = performance.now();
         locator.locate(input, ANY);
         locator.locate(`${input}/pluginfile.php/1/mod_scorm/content/1/i.html`, SCORM);
-        assert.ok(performance.now() - started < 500, `tardó ${(performance.now() - started).toFixed(0)} ms`);
+        assert.ok(performance.now() - started < 500, `Elapsed time: ${(performance.now() - started).toFixed(0)} ms`);
       });
     }
   });
