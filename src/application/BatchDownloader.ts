@@ -1,7 +1,7 @@
 import { AuthenticationError } from "../domain/errors.ts";
-import type { CourseItem } from "../domain/catalog.ts";
+import type { CourseItem, Section } from "../domain/catalog.ts";
 import type { Tracer } from "../tracing/Tracer.ts";
-import type { ItemOutcome, ItemTransfer } from "./ItemDownloader.ts";
+import type { DownloadTarget, ItemOutcome, ItemTransfer } from "./ItemDownloader.ts";
 import type { NamePlanner } from "./NamePlanner.ts";
 import type { Logger } from "./ports.ts";
 
@@ -45,14 +45,15 @@ export class BatchDownloader {
     this.concurrency = deps.settings.concurrency;
   }
 
-  async run(items: readonly CourseItem[], destRoot: string): Promise<BatchReport> {
+  async run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[] = []): Promise<BatchReport> {
     this.tracer.event("info", "download", "batch.start", { total: items.length, concurrency: this.concurrency });
     const plan = this.planner.plan(items);
+    const folders = this.planner.sectionFolders(sections);
     const slots = new Array<ItemOutcome | undefined>(items.length);
     const state: PoolState = { next: 0, done: 0, aborted: false };
     const workers = Math.min(this.concurrency, items.length);
 
-    await Promise.all(Array.from({ length: workers }, () => this.runWorker(items, plan, destRoot, slots, state)));
+    await Promise.all(Array.from({ length: workers }, () => this.runWorker(items, plan, folders, destRoot, slots, state)));
 
     const outcomes = slots.filter((outcome): outcome is ItemOutcome => outcome !== undefined);
     const report: BatchReport = {
@@ -74,6 +75,7 @@ export class BatchDownloader {
   private async runWorker(
     items: readonly CourseItem[],
     plan: ReadonlyMap<string, string>,
+    folders: ReadonlyMap<number, string>,
     destRoot: string,
     slots: Array<ItemOutcome | undefined>,
     state: PoolState,
@@ -82,7 +84,8 @@ export class BatchDownloader {
       const index = state.next;
       state.next += 1;
       const item = items[index]!;
-      slots[index] = await this.attempt(item, { destRoot, baseName: plan.get(item.id)! }, state);
+      const target = { destRoot, baseName: plan.get(item.id)!, sectionFolder: folders.get(item.sectionNumber) };
+      slots[index] = await this.attempt(item, target, state);
       state.done += 1;
       this.logger.progress({ done: state.done, total: items.length, label: item.name });
     }
@@ -90,7 +93,7 @@ export class BatchDownloader {
 
   private async attempt(
     item: CourseItem,
-    target: { destRoot: string; baseName: string },
+    target: DownloadTarget,
     state: PoolState,
   ): Promise<ItemOutcome> {
     try {
