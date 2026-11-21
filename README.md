@@ -22,7 +22,7 @@ If the Moodle session cookie is missing, the selector prompts for it with input 
 | `get <course> --all [--dest <path>]` | Download a course. Use `--week 1,3` or `--item 501,512` to select individual sections or materials. |
 | `<SCORM ID or pluginfile URL>` | Convert one SCORM slide deck to PDF. |
 | `diagnose` | Check course listings, course contents, and sample resource and SCORM downloads. Save a trace. |
-| `ascii <input>` | Convert an image, GIF, or video to ASCII. See the [ASCII extension](src/extensions/ascii/README.md). |
+| `ascii <input>` | Convert an image, GIF, or video to ASCII. See the [ascii-fire plugin](src/plugins/ascii-fire/README.md). |
 
 Run `node src/main.ts --help` for options. Exit status is 0 for success, 1 for an operation that failed, 2 for invalid usage, and 3 when Moodle rejects the session. Cancel with Ctrl+C to exit with status 130.
 
@@ -38,13 +38,25 @@ Course downloads keep existing files. They publish each completed file from a pr
 
 The default installation is `ro.utcluj.kb`. Select another Moodle site with `--platform https://campus.example.org` or `--base-url https://campus.example.org/moodle/`. Remote Moodle sites require HTTPS. HTTP is available for loopback addresses used in development. `SCORM_PLATFORM` and `MOODLE_BASE_URL` provide equivalent environment settings.
 
-Moodle installation profiles live under [src/extensions](src/extensions). The registry uses the standard Moodle adapter for hosts without a profile. English is the bundled CLI language. Use `--lang en` or `SCORM_LANG=en` to select it explicitly.
+Moodle installation profiles live under [src/extensions](src/extensions). The registry uses the standard Moodle adapter for hosts without a profile.
+
+## Language
+
+The CLI and interactive selector support English, Spanish, and Romanian offline. The default language comes from the system. Use `--lang ro` for one command or set `SCORM_LANG=ro` for your shell.
+
+The lookup order is `--lang`, `SCORM_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`, then the runtime's locale. A regional locale such as `es_MX.UTF-8` uses Spanish when there is no regional catalog. Unsupported languages and missing translations use the [English catalog](src/i18n/en.ts). Moodle titles, filenames, and JSON field names keep their original values.
+
+## Plugins
+
+The [application composition](src/composition/plugins.ts) registers the bundled plugins. Add a command by implementing [CommandPlugin](src/cli/CommandPlugin.ts) and registering it there. The host handles shared options, help, tracing, and cancellation. A command declares the environment settings it needs. The language provider implements [LanguagePlugin](src/i18n/LanguagePlugin.ts) and supplies typed messages to both core commands and plugins.
+
+The standalone build includes `i18n` and `ascii-fire`. Changes to the registered plugins require a rebuild.
 
 ## Diagnostics and cleanup
 
 Use `--trace`, `SCORM_TRACE=1`, `--trace-dir <path>`, or `diagnose` to save diagnostic events and selected response snapshots. The default path is `scorm-trace-<id>/`. Trace files are created with owner-only permissions on Unix-like systems. Common credentials are redacted, but snapshots can still contain course names, personal information, and fields specific to a Moodle installation. Review them before sharing.
 
-Course catalog data is cached in memory for one command. Output staging directories and extracted codec executables are removed on completion, recoverable errors, and handled interrupts. Completed output files remain after cancellation. Filesystem errors, a power loss, or a forced kill can leave an empty output directory or a private staging directory. The ASCII extension keeps verified ZIP archives for offline use.
+Course catalog data is cached in memory for one command. Output staging directories and extracted codec executables are removed on completion, recoverable errors, and handled interrupts. Completed output files remain after cancellation. Filesystem errors, a power loss, or a forced kill can leave an empty output directory or a private staging directory. The ascii-fire plugin keeps verified ZIP archives for offline use.
 
 ## Development
 
@@ -53,10 +65,10 @@ npm ci
 npm run typecheck
 npm test
 npm run ascii:prepare
-SCORM_ASCII_TEST=1 npm run coverage
+npm run coverage
 ~~~
 
-The suite uses synthetic Moodle data and starts a loopback HTTP server. Set `SCORM_ASCII_TEST=1` after preparing the codec cache to require media integration tests. The coverage command checks 99% lines, 97% branches, and 99% functions. The main code is under [src](src), with tests under [test](test).
+The suite uses synthetic Moodle data and starts a loopback HTTP server. The coverage command requires the media integration tests and checks 100% of lines, branches, and functions across executable files under [src](src), including the CLI entry points. Prepare the codec cache on a supported macOS or Linux host before running coverage. Set `SCORM_ASCII_CACHE` to use a cache prepared in another directory.
 
 With Bun installed, `npm run build` produces a standalone executable in `dist/` and removes the compiler's staging files.
 

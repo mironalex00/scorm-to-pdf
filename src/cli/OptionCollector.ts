@@ -9,6 +9,11 @@ export interface CollectedOptions {
   readonly positionals: string[];
 }
 
+export interface CommandPreview {
+  readonly first: string | undefined;
+  readonly language: string | undefined;
+}
+
 interface OptionToken {
   readonly name: string;
   readonly rawName: string;
@@ -24,28 +29,30 @@ export class OptionCollector {
     this.messages = deps.messages;
   }
 
-  /** Finds the command before full option validation. */
-  firstPositional(argv: readonly string[], specs: readonly OptionSpec[]): string | undefined {
-    const parsed = parseArgs({ args: [...argv], options: this.config(specs), allowPositionals: true, strict: false, tokens: true });
-    const first = parsed.tokens.find((token) => token.kind === "positional");
-    return first?.kind === "positional" ? first.value : undefined;
+  /** Finds the command and language before validating command-specific options. */
+  static preview(argv: readonly string[], specs: readonly OptionSpec[]): CommandPreview {
+    const tokens = this.tokens(argv, specs);
+    const first = tokens.find((token) => token.kind === "positional");
+    const language = tokens.find((token) => token.kind === "option" && token.name === "lang");
+    return { first: first?.value, language: language?.kind === "option" ? language.value : undefined };
   }
 
   collect(argv: readonly string[], specs: readonly OptionSpec[]): CollectedOptions {
-    const parsed = parseArgs({ args: [...argv], options: this.config(specs), allowPositionals: true, strict: false, tokens: true });
-    const known = new Map(specs.map((spec) => [spec.name as string, spec]));
+    const tokens = OptionCollector.tokens(argv, specs);
+    const known = new Map(specs.map((spec) => [spec.name, spec]));
     const result: CollectedOptions = { strings: new Map(), flags: new Set(), positionals: [] };
-    for (const token of parsed.tokens) {
+    for (const token of tokens) {
       if (token.kind === "positional") result.positionals.push(token.value);
       if (token.kind === "option") this.collectOption(token, known, result);
     }
     return result;
   }
 
-  private config(specs: readonly OptionSpec[]): Record<string, { type: "string" | "boolean"; short?: string }> {
-    const config: Record<string, { type: "string" | "boolean"; short?: string }> = {};
-    for (const spec of specs) config[spec.name] = spec.short ? { type: spec.kind, short: spec.short } : { type: spec.kind };
-    return config;
+  private static tokens(argv: readonly string[], specs: readonly OptionSpec[]) {
+    const options = Object.fromEntries(specs.map((spec) => [
+      spec.name, spec.short ? { type: spec.kind, short: spec.short } : { type: spec.kind },
+    ]));
+    return parseArgs({ args: [...argv], options, allowPositionals: true, strict: false, tokens: true }).tokens;
   }
 
   private collectOption(token: OptionToken, known: ReadonlyMap<string, OptionSpec>, into: CollectedOptions): void {

@@ -1,5 +1,5 @@
 /** Centers a text frame and crops it to fit the terminal. */
-export function fitAsciiFrame(frame: readonly string[], columns: number, rows: number): string[] {
+export function fitTerminalFrame(frame: readonly string[], columns: number, rows: number): string[] {
   const width = frame.reduce((longest, line) => Math.max(longest, line.length), 0);
   const top = Math.max(0, Math.floor((rows - frame.length) / 2));
   const firstRow = Math.max(0, Math.floor((frame.length - rows) / 2));

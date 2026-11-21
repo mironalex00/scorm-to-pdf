@@ -218,4 +218,19 @@ describe("SlideDownloader validation and errors", () => {
     assert.match(error.message, /Slide 2/);
     assert.deepEqual(http.requestedUrls(), [slideUrl(1), slideUrl(2)]);
   });
+
+  it("discards a completed slide after another worker fails", async () => {
+    const http = new FakeHttpClient()
+      .on(slideUrl(1), async () => {
+        await tick();
+        return image();
+      })
+      .on(slideUrl(2), statusResponse(400));
+    const { downloader, logger } = make(http);
+
+    await assert.rejects(downloader.download(slides(3), ENTRY), /Slide 2/);
+
+    assert.deepEqual(logger.updates, []);
+    assert.deepEqual(http.requestedUrls(), [slideUrl(1), slideUrl(2)]);
+  });
 });

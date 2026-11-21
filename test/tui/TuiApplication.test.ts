@@ -7,8 +7,8 @@ import type { ItemOutcome } from "../../src/application/ItemDownloader.ts";
 import { ReportPrinter } from "../../src/application/ReportPrinter.ts";
 import { AuthenticationError, DownloadError } from "../../src/domain/errors.ts";
 import type { CourseContents, CourseItem } from "../../src/domain/catalog.ts";
-import { asciiAnimations } from "../../src/extensions/ascii/generatedAnimations.ts";
-import { fitAsciiFrame } from "../../src/extensions/ascii/viewport.ts";
+import { asciiAnimations } from "../../src/plugins/ascii-fire/generatedAnimations.ts";
+import { fitTerminalFrame } from "../../src/tui/fitTerminalFrame.ts";
 import { en } from "../../src/i18n/en.ts";
 import { CompressedStore } from "../../src/store/CompressedStore.ts";
 import { NullTracer } from "../../src/tracing/NullTracer.ts";
@@ -26,7 +26,12 @@ import { CapturedStream } from "../support/streams.ts";
 const item = (id: string, name: string, sectionNumber: number, kind: "resource" | "scorm" = "resource"): CourseItem => ({ id, kind, name, url: "u", sectionNumber });
 const alfa: CourseContents = { sections: [{ number: 3, title: "Tres" }, { number: 1, title: "Uno" }], items: [item("a", "Tema A", 1), item("b", "Tema B", 1, "scorm"), item("c", "Tema C", 3)] };
 
-function make(keys: KeyPress[], options: { contents?: Record<string, CourseContents | Error>; report?: (items: readonly CourseItem[], logger: TuiLogger) => BatchReport | Promise<BatchReport>; courses?: Array<{ id: string; name: string }> } = {}) {
+function make(keys: KeyPress[], options: {
+  contents?: Record<string, CourseContents | Error>;
+  report?: (items: readonly CourseItem[], logger: TuiLogger) => BatchReport | Promise<BatchReport>;
+  courses?: Array<{ id: string; name: string }>;
+  signal?: AbortSignal;
+} = {}) {
   const platform = new FakePlatform();
   platform.courses = options.courses ?? [{ id: "2", name: "Beta" }, { id: "1", name: "Alfa" }];
   platform.contents = options.contents ?? { "1": alfa, "2": { sections: [], items: [] } };
@@ -43,10 +48,11 @@ function make(keys: KeyPress[], options: { contents?: Record<string, CourseConte
     },
   };
   const app = new TuiApplication({
-    terminal, catalog, batch, logger, messages: en, stdout, stderr, cwd: "carpeta-actual",
+    terminal, catalog, batch, logger, messages: en, stdout, stderr, cwd: "carpeta-actual", animations: asciiAnimations,
     namer: new FileNamer({ fallbackName: "archivo", maxNameBytes: 100 }),
     printer: new ReportPrinter({ logger: new MemoryLogger(), messages: en }),
     layout: new FrameLayout({ colors: false }),
+    signal: options.signal,
   });
   return { app, terminal, stdout, stderr, calls, platform };
 }
@@ -110,7 +116,7 @@ describe("TuiApplication downloads", () => {
     const art = asciiAnimations.farewell.frames;
     assert.equal(new Set(art.map((frame) => frame.join("\n"))).size, 3);
     for (const [index, frame] of art.entries()) {
-      const fitted = fitAsciiFrame(frame, columns - 1, rows - 5);
+      const fitted = fitTerminalFrame(frame, columns - 1, rows - 5);
       assert.deepEqual(frames[index]!.slice(3, 3 + fitted.length), fitted);
     }
     assert.deepEqual(frames.slice(0, 3), frames.slice(6, 9));
@@ -238,6 +244,29 @@ describe("TuiApplication cancellation and errors", () => {
     const { app, terminal } = make([key("enter"), key("escape")], { courses: [] });
     assert.equal(await app.run(), 130);
     assert.match(terminal.allFrames(), /No courses to show/);
+  });
+
+  it("restores the terminal on download interruption and preserves the signal reason", async () => {
+    for (const reason of [130, 143]) {
+      const controller = new AbortController();
+      const { app, terminal, stderr } = make([key("enter"), key("space"), key("enter"), key("enter"), key("enter")], {
+        signal: controller.signal,
+        report: () => {
+          controller.abort(reason);
+          controller.signal.throwIfAborted();
+          assert.fail("Expected download cancellation");
+        },
+      });
+      const finished = app.run();
+      if (reason === 130) {
+        assert.equal(await finished, 130);
+        assert.equal(stderr.output, "Cancelled.\n");
+      } else {
+        await assert.rejects(finished, (error: unknown) => error === reason);
+      }
+      assert.deepEqual([terminal.opened, terminal.closed], [1, 1]);
+      assert.ok(!terminal.allFrames().includes("Mulțumesc!"));
+    }
   });
 
   it("propagates loading errors and restores the terminal", async () => {

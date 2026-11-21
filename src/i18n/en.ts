@@ -16,7 +16,7 @@ export const en: Messages = {
     entry: "SCORM entry document (default: index.html).",
     revision: "SCORM content revision. Detected automatically by default.",
     platform: "Moodle profile ID or base URL (default: ro.utcluj.kb).",
-    lang: "Output language (default: en).",
+    lang: "Output language (en, es, or ro). Uses the system locale by default.",
     trace: "Save a diagnostic trace with redacted response snapshots.",
     "trace-dir": "Save a trace in this directory (default: scorm-trace-<id>).",
     json: "Print JSON.",
@@ -60,12 +60,12 @@ export const en: Messages = {
       `  ${p.program} items <course>        List sections and materials in a course`,
       `  ${p.program} get <course>          Download course materials`,
       `  ${p.program} diagnose              Check the Moodle connection and save a trace`,
-      `  ${p.program} ascii <input>         Convert images and videos to ASCII`,
     ],
     globalHeading: () => "Global options:",
     scormHeading: () => "SCORM options for <id | URL>:",
     listHeading: () => "Listing options for courses and items:",
     getHeading: () => "Download options for get:",
+    asciiCommandLine: (p) => `  ${p.program} ascii <input>         Convert images and videos to ASCII`,
     asciiHeading: () => "ASCII options:",
     asciiIntro: (p) => [
       `Usage: ${p.program} ascii <input> [options]`,
@@ -103,7 +103,6 @@ export const en: Messages = {
   },
 
   cli: {
-    unsupportedLocale: (p) => `Unsupported language "${p.locale}". Available: ${p.supported}.`,
     tooManyTargets: () => "Specify one SCORM ID or URL.",
     notIdNorUrl: (p) => `"${p.raw}" is not a numeric ID or a pluginfile.php URL.`,
     badPluginfileUrl: (p) =>
@@ -145,6 +144,29 @@ export const en: Messages = {
     invalidArchive: (p) => `The tool archive for ${p.tool} did not match the verified build.`,
     missingDependency: () => "The ASCII archive reader is missing. Run npm ci or bun install.",
     prepared: () => "ASCII converter ready for offline use.",
+    noInput: () => "Specify an input file.",
+    toolLaunchFailed: (p) => `Could not launch ${p.tool} from the temporary directory.`,
+    tooMuchMetadata: () => "The input contains too much metadata.",
+    invalidMedia: () => "No image or video with valid dimensions was found in the input.",
+    toolExited: (p) => `${p.tool} exited with ${p.status}. ${p.detail}`.trimEnd(),
+    incompleteFrame: () => "FFmpeg returned an incomplete frame.",
+    noFrames: () => "The input produced no frames.",
+    fpsRange: () => "Frame rate must be greater than 0 and no higher than 60.",
+    rowLimit: () => "The row limit must be a positive integer.",
+    frameLimit: () => "--max-frames requires an integer from 1 to 10000.",
+    exportTooLarge: () => "The animation is too large. Reduce the columns or --max-frames.",
+    sameFile: () => "Input and output must be different files.",
+    unsupportedFormat: (p) => `Unsupported output format: ${p.format || "(no extension)"}.`,
+    scaleRange: () => "Scale must be an integer from 1 to 8.",
+    gammaOrTone: () => "Gamma must be positive and tone weight cannot be negative.",
+    printableChars: () => "--chars must contain printable ASCII characters.",
+    invalidDimensions: () => "Invalid dimensions or aspect ratio.",
+    gridTooLarge: () => "The ASCII grid is too large.",
+    frameSizeMismatch: () => "The RGB24 frame does not match the grid dimensions.",
+    htmlNeedsFrame: () => "HTML output requires at least one frame.",
+    invalidHtmlSettings: () => "HTML output requires frames, columns, and a positive frame rate.",
+    rasterTooLarge: () => "The ASCII output image is too large.",
+    animationReadFailed: (p) => `Could not read ${p.file}.`,
   },
 
   commands: {
@@ -310,5 +332,9 @@ export const en: Messages = {
 
   logger: {
     warningPrefix: () => "Warning:",
+  },
+
+  build: {
+    built: (p) => `Built ${p.path}`,
   },
 };

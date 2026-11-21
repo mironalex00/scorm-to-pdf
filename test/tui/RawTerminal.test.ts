@@ -153,6 +153,26 @@ describe("RawTerminal input", () => {
     assert.deepEqual(await read("\x03", { name: "c", ctrl: true }), { name: "ctrl-c" });
   });
 
+  it("forwards Ctrl+C to the reader only when the interrupt handler declines it", async (t) => {
+    const input = new FakeInput();
+    const output = new FakeOutput();
+    let handled = true;
+    const interrupt = t.mock.fn(() => handled);
+    const terminal = new RawTerminal({ input, output, interrupt });
+    terminal.open();
+    t.after(() => terminal.close());
+
+    const next = terminal.readKey();
+    input.press("\x03", { name: "c", ctrl: true });
+    input.press("a", { name: "a" });
+    assert.deepEqual(await next, { name: "char", char: "a" });
+
+    handled = false;
+    input.press("\x03", { name: "c", ctrl: true });
+    assert.deepEqual(await terminal.readKey(), { name: "ctrl-c" });
+    assert.equal(interrupt.mock.callCount(), 2);
+  });
+
   it("splits pasted text into individual keys and ignores nonprintable input", async () => {
     const { terminal, input } = make();
     terminal.open();
@@ -190,5 +210,20 @@ describe("RawTerminal input", () => {
     input.press("\r", { name: "return" });
     assert.deepEqual(await next, { name: "enter" });
     terminal.close();
+  });
+
+  it("forgets a read's abort signal after delivering a key", async (t) => {
+    const { terminal, input } = make();
+    terminal.open();
+    t.after(() => terminal.close());
+    const controller = new AbortController();
+    const first = terminal.readKey(controller.signal);
+    input.press("a", { name: "a" });
+    assert.deepEqual(await first, { name: "char", char: "a" });
+
+    const next = terminal.readKey();
+    controller.abort();
+    input.press("b", { name: "b" });
+    assert.deepEqual(await next, { name: "char", char: "b" });
   });
 });

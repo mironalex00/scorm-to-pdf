@@ -73,6 +73,15 @@ function digest(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/** Reads only the named executable and bounds the size before decompression. */
+export function extractTool(name: Tool, archive: Uint8Array, unzip: typeof import("fflate").unzipSync, messages: Messages["ascii"]): Uint8Array {
+  const binary = unzip(archive, {
+    filter: (file) => file.name === name && file.originalSize > 0 && file.originalSize <= MAX_EXECUTABLE,
+  })[name];
+  if (!binary?.length) throw new OutputError(messages.invalidArchive({ tool: name }));
+  return binary;
+}
+
 /** Caches verified ZIPs and extracts a private pair of tools for each operation. */
 export class PortableMediaRuntime implements MediaRuntime {
   private readonly cache: string;
@@ -112,10 +121,7 @@ export class PortableMediaRuntime implements MediaRuntime {
     try {
       for (const name of TOOLS) {
         const archive = await this.archive(name, build, signal);
-        const binary = unzip(archive, {
-          filter: (file) => file.name === name && file.originalSize > 0 && file.originalSize <= MAX_EXECUTABLE,
-        })[name];
-        if (!binary?.length) throw new OutputError(this.messages.ascii.invalidArchive({ tool: name }));
+        const binary = extractTool(name, archive, unzip, this.messages.ascii);
         await writeFile(files[name], binary, { mode: 0o700, flag: "wx", signal });
       }
       signal?.throwIfAborted();

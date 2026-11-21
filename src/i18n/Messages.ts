@@ -22,6 +22,7 @@ export interface Messages {
     scormHeading(): string;
     listHeading(): string;
     getHeading(): string;
+    asciiCommandLine(p: { program: string }): string;
     asciiHeading(): string;
     asciiIntro(p: { program: string }): string[];
     asciiEnvironment(): string;
@@ -31,7 +32,6 @@ export interface Messages {
   };
 
   readonly cli: {
-    unsupportedLocale(p: { locale: string; supported: string }): string;
     tooManyTargets(): string;
     notIdNorUrl(p: { raw: string }): string;
     badPluginfileUrl(p: { raw: string }): string;
@@ -69,6 +69,29 @@ export interface Messages {
     invalidArchive(p: { tool: string }): string;
     missingDependency(): string;
     prepared(): string;
+    noInput(): string;
+    toolLaunchFailed(p: { tool: string }): string;
+    tooMuchMetadata(): string;
+    invalidMedia(): string;
+    toolExited(p: { tool: string; status: string; detail: string }): string;
+    incompleteFrame(): string;
+    noFrames(): string;
+    fpsRange(): string;
+    rowLimit(): string;
+    frameLimit(): string;
+    exportTooLarge(): string;
+    sameFile(): string;
+    unsupportedFormat(p: { format: string }): string;
+    scaleRange(): string;
+    gammaOrTone(): string;
+    printableChars(): string;
+    invalidDimensions(): string;
+    gridTooLarge(): string;
+    frameSizeMismatch(): string;
+    htmlNeedsFrame(): string;
+    invalidHtmlSettings(): string;
+    rasterTooLarge(): string;
+    animationReadFailed(p: { file: string }): string;
   };
 
   readonly commands: {
@@ -222,5 +245,9 @@ export interface Messages {
 
   readonly logger: {
     warningPrefix(): string;
+  };
+
+  readonly build: {
+    built(p: { path: string }): string;
   };
 }

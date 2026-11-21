@@ -19,7 +19,8 @@ export class NodeFileSink implements FileSink {
       const entry = await lstat(resolve(path));
       return entry.isFile() || entry.isSymbolicLink();
     } catch (error) {
-      if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+      const { code } = error as NodeJS.ErrnoException;
+      if (code === "ENOENT" || code === "ENOTDIR") return false;
       throw error;
     }
   }
@@ -46,13 +47,13 @@ export class NodeFileSink implements FileSink {
         signal?.throwIfAborted();
         if (overwrite) await rename(temporary, target);
         else await link(temporary, target);
-        return true;
       } catch (error) {
         if (!overwrite && (error as NodeJS.ErrnoException).code === "EEXIST" && await this.exists(target)) return false;
         throw error;
       } finally {
         await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
       }
+      return true;
     } catch (error) {
       signal?.throwIfAborted();
       throw new OutputError(this.messages.sink.writeFailed({ target, detail: errorMessage(error) }), { cause: error });

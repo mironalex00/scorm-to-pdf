@@ -30,7 +30,7 @@ after(() => Promise.all(servers.map((s) => s.close())));
 async function run(moodle: LocalServer, argv: string[], env: Record<string, string | undefined> = {}) {
   const stdout = new CapturedStream();
   const stderr = new CapturedStream();
-  const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, ...env }, stdout, stderr, cwd: work });
+  const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, SCORM_LANG: "en", ...env }, stdout, stderr, cwd: work });
   const code = await app.run([...argv, "--base-url", moodle.origin]);
   return { code, stdout: stdout.output, stderr: stderr.output };
 }
@@ -198,24 +198,30 @@ describe("Platform, locale, and diagnostics", () => {
     assert.ok(!stdout.includes("Read course contents"));
   });
 
-  it("rejects an unknown platform or an unsupported locale", async () => {
+  it("rejects an unknown platform without leaving a trace", async () => {
     const moodle = await server();
     const platform = await run(moodle, ["courses", "--platform", "com.otro.app"]);
     assert.equal(platform.code, 2);
     assert.match(platform.stderr, /Unknown platform.*ro\.utcluj\.kb/);
     assert.ok(!platform.stderr.includes("Trace saved"));
-    const lang = await run(moodle, ["courses", "--lang", "xx"]);
-    assert.equal(lang.code, 2);
-    assert.match(lang.stderr, /Unsupported language/);
     assert.deepEqual((await readdir(work)).filter((n) => n.startsWith("scorm-trace-")), [], "usage errors leave no trace");
   });
 
-  it("accepts both --lang forms and uses English in a Spanish environment", async () => {
+  it("localizes section labels without changing the Moodle titles or JSON", async () => {
     const moodle = await server();
-    assert.equal((await run(moodle, ["courses", "--lang=en"])).code, 0);
-    assert.equal((await run(moodle, ["courses", "--lang", "en"])).code, 0);
-    const fallback = await run(moodle, ["items", "102"], { LANG: "es_ES.UTF-8", SCORM_LANG: "es" });
+    const args = ["items", "102"];
+    const automatic = await run(moodle, args, { LANG: "es_MX.UTF-8", SCORM_LANG: undefined });
+    const explicit = await run(moodle, [...args, "--lang", "ro"], { SCORM_LANG: "es" });
+    const fallback = await run(moodle, [...args, "--lang=xx"], { SCORM_LANG: "es" });
+    assert.equal(automatic.code, 0, automatic.stderr);
+    assert.equal(explicit.code, 0, explicit.stderr);
     assert.equal(fallback.code, 0, fallback.stderr);
+    assert.match(automatic.stdout, /^Sección 0 - General\n/);
+    assert.match(explicit.stdout, /^Secțiunea 0 - General\n/);
     assert.match(fallback.stdout, /^Section 0 - General\n/);
+    assert.deepEqual(
+      JSON.parse((await run(moodle, [...args, "--json", "--lang=ro"])).stdout),
+      JSON.parse((await run(moodle, [...args, "--json", "--lang=en"])).stdout),
+    );
   });
 });

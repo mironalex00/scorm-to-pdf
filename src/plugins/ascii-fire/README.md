@@ -1,4 +1,4 @@
-# ASCII conversion
+# ascii-fire
 
 Convert JPEG, PNG, static WebP, animated GIF, MP4, and WebM into ASCII. The engine matches the shape and brightness of each cell to a printable glyph. Terminal and raster output can use foreground and background colors.
 
@@ -6,8 +6,8 @@ Convert JPEG, PNG, static WebP, animated GIF, MP4, and WebM into ASCII. The engi
 
 ~~~sh
 node src/main.ts ascii --help
-node src/main.ts ascii src/extensions/ascii/content/bear_hoop.png --invert -w 48
-node src/main.ts ascii src/extensions/ascii/content/wink_cat.gif --loop --color --fps 12
+node src/main.ts ascii src/plugins/ascii-fire/content/bear_hoop.png --invert -w 48
+node src/main.ts ascii src/plugins/ascii-fire/content/wink_cat.gif --loop --color --fps 12
 node src/main.ts ascii video.mp4 -o video-ascii.webm --bg --cols 100
 ~~~
 
@@ -37,7 +37,7 @@ The standalone executable includes the ZIP reader and the interactive farewell a
 ## TypeScript API
 
 ~~~ts
-import { fitAsciiFrame, renderAsciiClip } from "./src/extensions/ascii/index.ts";
+import { fitAsciiFrame, renderAsciiClip } from "./src/plugins/ascii-fire/index.ts";
 
 const clip = await renderAsciiClip("wink_cat.gif", { cols: 40, fps: 12 });
 const firstFrame = fitAsciiFrame(clip.frames[0]!, 79, 20);
