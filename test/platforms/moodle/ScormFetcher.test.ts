@@ -33,6 +33,19 @@ describe("ScormFetcher launch", () => {
     assert.ok(events().some((e) => e.scope === "moodle.scorm" && e.name === "launch.params" && e.data?.scoid === "9"));
   });
 
+  it("retains a nonnumeric SCO identifier in the request and omits it from the launch diagnostics", async () => {
+    const loadUrl = `${LOAD}?a=7&scoid=intro&currentorg=&mode=&attempt=1`;
+    const http = new FakeHttpClient()
+      .on(loadUrl, redirectResponse(ENTRY_URL))
+      .on(ENTRY_URL, okResponse(ENTRY_HTML));
+    const { fetcher, events } = make(http);
+
+    assert.deepEqual(await fetcher.fetch({ ...view, url: `${M}/player.php?a=7&scoid=intro` }), slides);
+
+    assert.deepEqual(http.requestedUrls(), [loadUrl, ENTRY_URL]);
+    assert.deepEqual(events().find((event) => event.name === "launch.params")?.data, { module: "activity" });
+  });
+
   it("defaults to an empty mode and attempt 1", async () => {
     const http = new FakeHttpClient()
       .on(`${LOAD}?a=7&scoid=9&currentorg=ORG-1&mode=&attempt=1`, okResponse(ENTRY_HTML));
