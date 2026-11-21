@@ -73,14 +73,14 @@ export class FetchHttpClient implements HttpClient {
         }
         total = end;
       }
-      if (contiguous) return contiguous.subarray(0, total);
-      return chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks, total);
     } catch (error) {
       await reader.cancel().catch(() => undefined);
       throw error;
     } finally {
       reader.releaseLock();
     }
+    if (contiguous) return contiguous.subarray(0, total);
+    return chunks.length === 1 ? chunks[0]! : Buffer.concat(chunks, total);
   }
 
   private tooLarge(request: HttpRequest): DownloadError {
