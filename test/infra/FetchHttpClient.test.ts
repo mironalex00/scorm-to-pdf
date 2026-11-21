@@ -122,6 +122,56 @@ describe("FetchHttpClient", () => {
     assert.match(error.message, /1000-byte limit/);
   });
 
+  for (const [description, declared] of [["matching", 5], ["understated", 3]] as const) {
+    it(`keeps all streamed bytes when the decoded length is ${description}`, async (t) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(Uint8Array.of(1, 2));
+          controller.enqueue(Uint8Array.of(3, 4));
+          controller.enqueue(Uint8Array.of(5));
+          controller.close();
+        },
+      });
+      const response = new Response(body, { headers: { "content-length": String(declared), "content-encoding": "identity" } });
+      t.mock.method(globalThis, "fetch", async () => response);
+
+      const received = await client.get(request("/slides", 5));
+
+      assert.deepEqual([...received.body], [1, 2, 3, 4, 5]);
+      assert.equal(body.locked, false);
+    });
+  }
+
+  it("reports the byte limit if cancelling an oversized response fails", async (t) => {
+    const cancel = t.mock.fn(() => Promise.reject(new Error("Response already closing")));
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    const oversized = new Response(body, { headers: { "content-length": "3000" } });
+    t.mock.method(globalThis, "fetch", async () => oversized);
+
+    await assert.rejects(
+      client.get(request("/slides")),
+      { name: "DownloadError", message: en.http.responseTooLarge({ path: "/slides", max: "1000" }) },
+    );
+    assert.equal(cancel.mock.callCount(), 1);
+  });
+
+  it("preserves a stream failure as the cause and releases the reader", async (t) => {
+    const cause = new Error("The response stream failed");
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(cause);
+      },
+    });
+    const failed = new Response(body);
+    t.mock.method(globalThis, "fetch", async () => failed);
+
+    await assert.rejects(
+      client.get(request("/slides")),
+      (error) => error instanceof DownloadError && error.retryable && error.cause === cause,
+    );
+    assert.equal(body.locked, false);
+  });
+
   it("stops when a streamed response exceeds the limit", async () => {
     const error = await client.get(request("/streamed-big")).catch((e: unknown) => e);
     assert.ok(error instanceof DownloadError);

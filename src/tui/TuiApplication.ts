@@ -7,13 +7,11 @@ import type { ProgressUpdate } from "../application/ports.ts";
 import type { ReportPrinter } from "../application/ReportPrinter.ts";
 import type { CourseContents, CourseItem, CourseSummary, Section } from "../domain/catalog.ts";
 import { errorMessage } from "../domain/errors.ts";
-import { asciiAnimations } from "../extensions/ascii/generatedAnimations.ts";
-import type { AsciiClip } from "../extensions/ascii/index.ts";
-import { fitAsciiFrame } from "../extensions/ascii/viewport.ts";
 import type { Messages } from "../i18n/Messages.ts";
 import type { OutputStream } from "../infra/ConsoleLogger.ts";
 import { plainLine } from "../infra/plainText.ts";
 import type { FrameLayout } from "./FrameLayout.ts";
+import { fitTerminalFrame } from "./fitTerminalFrame.ts";
 import { ScreenRunner } from "./ScreenRunner.ts";
 import { CourseSelectionScreen } from "./screens/CourseSelectionScreen.ts";
 import { ItemSelectionScreen } from "./screens/ItemSelectionScreen.ts";
@@ -26,6 +24,13 @@ import type { TuiLogger } from "./TuiLogger.ts";
 export interface ItemBatch {
   run(items: readonly CourseItem[], destRoot: string, sections: readonly Section[], itemFolders: { allItems: readonly CourseItem[] }): Promise<BatchReport>;
 }
+
+interface TerminalClip {
+  readonly fps: number;
+  readonly frames: readonly (readonly string[])[];
+}
+
+export type TerminalAnimations = Readonly<Record<"farewell" | "downloadFailure" | "unexpectedFailure", TerminalClip>>;
 
 type Step = "course" | "items" | "confirm" | "destination";
 interface CourseSelection {
@@ -54,6 +59,7 @@ export class TuiApplication {
   private readonly stderr: OutputStream;
   private readonly cwd: string;
   private readonly signal: AbortSignal | undefined;
+  private readonly animations: TerminalAnimations;
 
   constructor(deps: {
     terminal: Terminal;
@@ -68,6 +74,7 @@ export class TuiApplication {
     stderr: OutputStream;
     cwd: string;
     signal?: AbortSignal;
+    animations: TerminalAnimations;
   }) {
     this.terminal = deps.terminal;
     this.runner = new ScreenRunner({ terminal: deps.terminal, signal: deps.signal });
@@ -82,6 +89,7 @@ export class TuiApplication {
     this.stderr = deps.stderr;
     this.cwd = deps.cwd;
     this.signal = deps.signal;
+    this.animations = deps.animations;
   }
 
   async run(): Promise<number> {
@@ -90,14 +98,14 @@ export class TuiApplication {
     try {
       outcome = await this.flow();
       if (outcome.kind === "finished" && outcome.report.failed === 0 && !outcome.report.aborted) {
-        await this.animate(this.messages.tui.farewell(), asciiAnimations.farewell, 3);
+        await this.animate(this.messages.tui.farewell(), this.animations.farewell, 3);
       }
     } catch (error) {
       if (this.signal?.aborted) {
         if (this.signal.reason === CANCELLED_EXIT_CODE) outcome = { kind: "cancelled" };
         else throw error;
       } else {
-        await this.animate(this.messages.tui.unexpectedTitle(), asciiAnimations.unexpectedFailure);
+        await this.animate(this.messages.tui.unexpectedTitle(), this.animations.unexpectedFailure);
         throw error;
       }
     } finally {
@@ -266,7 +274,7 @@ export class TuiApplication {
     }
     const report = { outcomes, downloaded, skipped, failed, aborted };
     if (report.failed > 0 || report.aborted) {
-      await this.animate(this.messages.tui.errorsTitle(), asciiAnimations.downloadFailure);
+      await this.animate(this.messages.tui.errorsTitle(), this.animations.downloadFailure);
       await this.runner.run(this.errorsScreen(report));
     }
     return { kind: "finished", report, dest: contentRoot };
@@ -329,13 +337,13 @@ export class TuiApplication {
     return this.printer.exitCode(report);
   }
 
-  private async animate(title: string, clip: AsciiClip, cycles = 1): Promise<void> {
+  private async animate(title: string, clip: TerminalClip, cycles = 1): Promise<void> {
     const timeline = Array.from({ length: cycles }, () => clip.frames).flat();
     for (const [index, frame] of timeline.entries()) {
       const size = this.terminal.size();
       this.terminal.render(this.layout.compose({
         title,
-        body: fitAsciiFrame(frame, Math.max(2, size.columns - 1), this.layout.bodyHeight(size)),
+        body: fitTerminalFrame(frame, Math.max(2, size.columns - 1), this.layout.bodyHeight(size)),
         footer: "",
         size,
       }));

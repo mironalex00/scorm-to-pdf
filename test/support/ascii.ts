@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ASCII_TOOL_RELEASE } from "../../src/extensions/ascii/runtime.ts";
+import { ASCII_TOOL_RELEASE } from "../../src/plugins/ascii-fire/runtime.ts";
 
 export const asciiProject = fileURLToPath(new URL("../../", import.meta.url));
 export const asciiCache = resolve(process.env.SCORM_ASCII_CACHE?.trim() || ".ascii-cache");
@@ -20,4 +20,4 @@ export const offline = {
   },
 };
 
-export const asciiAsset = (name: string) => join(asciiProject, "src/extensions/ascii/content", name);
+export const asciiAsset = (name: string) => join(asciiProject, "src/plugins/ascii-fire/content", name);

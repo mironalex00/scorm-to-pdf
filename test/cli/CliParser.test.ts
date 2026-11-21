@@ -5,13 +5,21 @@ import { CliParser } from "../../src/cli/CliParser.ts";
 import { HelpFormatter } from "../../src/cli/HelpFormatter.ts";
 import { UsageError } from "../../src/domain/errors.ts";
 import type { CliCommand } from "../../src/cli/commands.ts";
+import { OptionCollector } from "../../src/cli/OptionCollector.ts";
+import { builtInPlugins } from "../../src/composition/plugins.ts";
+import { COMMON_OPTIONS } from "../../src/cli/optionSpecs.ts";
+import { ASCII_OPTIONS } from "../../src/plugins/ascii-fire/options.ts";
+import { parseAsciiRequest } from "../../src/plugins/ascii-fire/parse.ts";
+
+const plugins = builtInPlugins.commands;
 
 function makeParser(env: Record<string, string | undefined> = {}): CliParser {
   return new CliParser({
     version: "1.2.3",
     env,
     messages: en,
-    help: new HelpFormatter({ programName: "scorm-to-pdf", messages: en }),
+    help: new HelpFormatter({ programName: "scorm-to-pdf", messages: en, plugins }),
+    plugins,
   });
 }
 
@@ -118,7 +126,7 @@ describe("CliParser valid inputs", () => {
 
 describe("CliParser help and version", () => {
   it("shows help with --help or -h without a module ID", () => {
-    const expected = new HelpFormatter({ programName: "scorm-to-pdf", messages: en }).format();
+    const expected = new HelpFormatter({ programName: "scorm-to-pdf", messages: en, plugins }).format();
     assert.deepEqual(makeParser().parse(["--help"]), { kind: "help", text: expected });
     assert.deepEqual(makeParser().parse(["-h"]), { kind: "help", text: expected });
   });
@@ -175,18 +183,22 @@ describe("CliParser usage errors", () => {
 
 describe("CliParser commands", () => {
   it("accepts shared options and aliases before the ascii command", () => {
+    const argv = ["-w", "40.0", "-o", "out.json", "ascii", "input.png", "--bg", "--tone=0", "--fps", "12.5", "--chars=", "-q"];
     const command = parseKind(
-      ["-w", "40.0", "-o", "out.json", "ascii", "input.png", "--bg", "--tone=0", "--fps", "12.5", "--chars=", "-q"],
-      "ascii",
+      argv,
+      "plugin",
       { MOODLE_BASE_URL: "incorrecta", SCORM_PLATFORM: "inexistente" },
     );
-    assert.equal(command.request.kind, "convert");
+    assert.equal(command.plugin.id, "ascii-fire");
+    assert.equal(command.invocation.action, "convert");
     assert.equal(command.global.quiet, true);
-    if (command.request.kind !== "convert") assert.fail("Expected an ASCII conversion");
-    const { input, options } = command.request;
+    const collected = new OptionCollector({ messages: en }).collect(argv, [...COMMON_OPTIONS, ...ASCII_OPTIONS]);
+    const request = parseAsciiRequest(collected, collected.positionals.slice(1), en);
+    assert.equal(request.kind, "convert");
+    const { input, options } = request;
     assert.deepEqual([input, options.cols, options.out, options.bg, options.tone, options.fps, options.chars],
       ["input.png", 40, "out.json", true, 0, 12.5, ""]);
-    assert.equal(parseKind(["ascii", "--prepare"], "ascii").request.kind, "prepare");
+    assert.equal(parseKind(["ascii", "--prepare"], "plugin").invocation.action, "prepare");
     assert.match(parseKind(["ascii", "--help"], "help").text, /ascii <input>.*--prepare/s);
   });
 

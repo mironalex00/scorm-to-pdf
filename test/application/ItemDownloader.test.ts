@@ -49,27 +49,48 @@ describe("ItemDownloader", () => {
   it("writes a direct resource as received under its section folder", async () => {
     const { platform, sink, downloader } = make();
     const bytes = Uint8Array.of(1, 2, 3);
+    const path = join("out", "3", "Complementar.pdf");
     platform.fetched["1"] = { kind: "file", bytes, fileName: "origen.pdf", contentType: "application/pdf" };
     const outcome = await downloader.download(item("1", "resource", 3), { destRoot: "out", baseName: "Complementar" });
-    assert.deepEqual(outcome, { item: item("1", "resource", 3), status: "downloaded", path: "out/3/Complementar.pdf", bytes: 3 });
-    assert.deepEqual([...sink.files.get("out/3/Complementar.pdf")!], [1, 2, 3]);
+    assert.deepEqual(outcome, { item: item("1", "resource", 3), status: "downloaded", path, bytes: 3 });
+    assert.deepEqual([...sink.files.get(path)!], [1, 2, 3]);
   });
 
   it("converts SCORM slides and writes a PDF under the item name", async () => {
     const { platform, sink, downloader } = make();
+    const path = join("out", "1", "Curs 5.pdf");
     platform.fetched["2"] = { kind: "slides", entryUrl: new URL(`${ROOT}/index.html`), html: buildDeckHtml({ slides: [{ src: "slides/a.jpg" }] }) };
     const outcome = await downloader.download(item("2", "scorm", 1), { destRoot: "out", baseName: "Curs 5" });
     assert.equal(outcome.status, "downloaded");
-    assert.equal(outcome.status === "downloaded" && outcome.path, "out/1/Curs 5.pdf");
-    assert.equal(Buffer.from(sink.files.get("out/1/Curs 5.pdf")!).subarray(0, 4).toString("latin1"), "%PDF");
+    assert.equal(outcome.status === "downloaded" && outcome.path, path);
+    assert.equal(Buffer.from(sink.files.get(path)!).subarray(0, 4).toString("latin1"), "%PDF");
   });
 
   it("skips an existing file and preserves its contents", async () => {
     const { platform, sink, downloader } = make();
+    const path = join("out", "1", "Hecho.pdf");
     platform.fetched["1"] = { kind: "file", bytes: Uint8Array.of(9), fileName: "a.pdf", contentType: "application/pdf" };
-    sink.files.set("out/1/Hecho.pdf", Uint8Array.of(7));
+    sink.files.set(path, Uint8Array.of(7));
     const outcome = await downloader.download(item("1", "resource", 1), { destRoot: "out", baseName: "Hecho" });
-    assert.deepEqual([outcome.status, [...sink.files.get("out/1/Hecho.pdf")!]], ["skipped", [7]]);
+    assert.deepEqual([outcome.status, [...sink.files.get(path)!]], ["skipped", [7]]);
+  });
+
+  it("preserves the other writer's file if it appears after the existence check", async (t) => {
+    const { platform, sink, downloader } = make();
+    const resource = item("1", "resource", 1);
+    const path = join("out", "1", "Apuntes.pdf");
+    const otherContent = Uint8Array.of(4, 5, 6);
+    platform.fetched["1"] = { kind: "file", bytes: Uint8Array.of(9), fileName: "course.pdf", contentType: "application/pdf" };
+    const publish = sink.writeIfAbsent.bind(sink);
+    t.mock.method(sink, "writeIfAbsent", async (target: string, content: Uint8Array) => {
+      sink.files.set(path, otherContent);
+      return publish(target, content);
+    });
+
+    const outcome = await downloader.download(resource, { destRoot: "out", baseName: "Apuntes" });
+
+    assert.deepEqual(outcome, { item: resource, status: "skipped", path });
+    assert.deepEqual(sink.files.get(path), otherContent);
   });
 
   it("skips an existing SCORM PDF before fetching the activity", async () => {

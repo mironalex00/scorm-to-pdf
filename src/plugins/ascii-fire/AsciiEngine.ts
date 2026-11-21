@@ -1,3 +1,5 @@
+import { en } from "../../i18n/en.ts";
+import type { Messages } from "../../i18n/Messages.ts";
 import { FONT } from "./font.ts";
 
 export const CELL_WIDTH = 6;
@@ -63,16 +65,18 @@ export class AsciiEngine {
   private readonly lut: Uint8Array;
   private readonly options: Required<AsciiOptions>;
   private readonly colored: boolean;
+  private readonly messages: Messages["ascii"];
 
-  constructor(options: AsciiOptions = {}) {
+  constructor(options: AsciiOptions = {}, messages = en.ascii) {
+    this.messages = messages;
     const { chars = "", bg = false, color = false, invert = false, gamma = 1, tone = 1 } = options;
     if (!Number.isFinite(gamma) || gamma <= 0 || !Number.isFinite(tone) || tone < 0) {
-      throw new Error("Gamma must be positive and tone weight cannot be negative.");
+      throw new Error(this.messages.gammaOrTone());
     }
     this.options = { chars, bg, color, invert, gamma, tone };
     const alphabet = chars ? [...new Set([...chars].filter((char) => PRINTABLE_ASCII.test(char)))]
       : Array.from({ length: 95 }, (_, index) => String.fromCharCode(index + 32));
-    if (alphabet.length === 0) throw new Error("--chars must contain printable ASCII characters.");
+    if (alphabet.length === 0) throw new Error(this.messages.printableChars());
     const masks = alphabet.map(glyphMask);
     const dots = masks.map((mask) => Uint8Array.from([...mask.keys()].filter((index) => mask[index] === 1)));
     const maxDots = Math.max(1, ...dots.map((indices) => indices.length));
@@ -89,16 +93,16 @@ export class AsciiEngine {
 
   size(srcW: number, srcH: number, cols: number, aspect: number) {
     if (![srcW, srcH, cols].every((value) => Number.isSafeInteger(value) && value > 0) ||
-        !Number.isFinite(aspect) || aspect <= 0) throw new Error("Invalid dimensions or aspect ratio.");
+        !Number.isFinite(aspect) || aspect <= 0) throw new Error(this.messages.invalidDimensions());
     const rows = Math.max(1, Math.round(cols * aspect * srcH / srcW));
-    if (cols > 500 || rows > 500 || cols * rows > 75_000) throw new Error("The ASCII grid is too large.");
+    if (cols > 500 || rows > 500 || cols * rows > 75_000) throw new Error(this.messages.gridTooLarge());
     return { cols, rows, w: cols * CELL_WIDTH, h: rows * CELL_HEIGHT };
   }
 
   frame(rgb: Uint8Array, cols: number, rows: number): AsciiGrid {
     const cells = cols * rows;
     if (!Number.isSafeInteger(cols) || !Number.isSafeInteger(rows) || cols <= 0 || rows <= 0 ||
-        cells * PIXELS * 3 !== rgb.length) throw new Error("The RGB24 frame does not match the grid dimensions.");
+        cells * PIXELS * 3 !== rgb.length) throw new Error(this.messages.frameSizeMismatch());
     const gi = new Uint8Array(cells);
     const fg = new Uint8Array(cells * 3);
     const bg = new Uint8Array(cells * 3);
@@ -233,13 +237,13 @@ export class AsciiEngine {
 
   html(grids: readonly AsciiGrid[], fps = 12): string {
     const grid = grids[0];
-    if (!grid) throw new Error("HTML output requires at least one frame.");
+    if (!grid) throw new Error(this.messages.htmlNeedsFrame());
     return this.htmlDocument(grids.map((frame) => this.htmlFrame(frame)), grid.cols, fps);
   }
 
   htmlDocument(frames: readonly string[], cols: number, fps: number): string {
     if (frames.length === 0 || !Number.isInteger(cols) || cols < 1 || !Number.isFinite(fps) || fps <= 0) {
-      throw new Error("HTML output requires frames, columns, and a positive frame rate.");
+      throw new Error(this.messages.invalidHtmlSettings());
     }
     const light = !this.options.bg && this.options.invert;
     const css = "body{margin:0;min-height:100vh;display:grid;place-items:center;background:" + (light ? "#fff" : "#000") +
@@ -253,11 +257,11 @@ export class AsciiEngine {
   }
 
   raster(grid: AsciiGrid, scale = 2): RasterFrame {
-    if (!Number.isSafeInteger(scale) || scale < 1 || scale > 8) throw new Error("Scale must be an integer from 1 to 8.");
+    if (!Number.isSafeInteger(scale) || scale < 1 || scale > 8) throw new Error(this.messages.scaleRange());
     const { cols, rows, gi, fg, bg } = grid;
     const w = cols * CELL_WIDTH * scale;
     const h = rows * CELL_HEIGHT * scale;
-    if (w * h > 32_000_000) throw new Error("The ASCII output image is too large.");
+    if (w * h > 32_000_000) throw new Error(this.messages.rasterTooLarge());
     const buf = Buffer.alloc(w * h * 3);
     const ink = this.options.invert ? 0 : 255;
     const paper = 255 - ink;

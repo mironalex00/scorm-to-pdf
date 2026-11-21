@@ -9,20 +9,28 @@ import { setTimeout } from "node:timers/promises";
 import { promisify } from "node:util";
 import { CliApplication } from "../../src/CliApplication.ts";
 import { CliInterruptions } from "../../src/cli/CliInterruptions.ts";
-import { asciiAsset, asciiCache, asciiIntegration, asciiProject, asciiSupported } from "../support/ascii.ts";
+import { asciiAsset, asciiCache, asciiIntegration, asciiProject, asciiSupported, offline } from "../support/ascii.ts";
 import { CapturedStream } from "../support/streams.ts";
 
 const exec = promisify(execFile);
 const main = join(asciiProject, "src/main.ts");
+const standalone = join(asciiProject, "src/plugins/ascii-fire/main.ts");
 const legacy = join(asciiProject, "src/extensions/ascii/main.ts");
 
 test("routes ASCII help and usage errors through the main CLI", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "ascii-cli-test-"));
   t.after(() => rm(cwd, { recursive: true, force: true }));
-  const env = { ...process.env, PATH: "", MOODLE_COOKIE: "", MOODLE_BASE_URL: "invalid-url", SCORM_PLATFORM: "unknown" };
-  const active = await exec(process.execPath, [main, "ascii", "--help"], { cwd, env });
-  const compatible = await exec(process.execPath, [legacy, "--help"], { cwd, env });
+  const env = {
+    ...process.env, PATH: "", MOODLE_COOKIE: "", MOODLE_BASE_URL: "invalid-url", SCORM_PLATFORM: "unknown", SCORM_LANG: "en",
+  };
+  const [active, direct, compatible] = await Promise.all([
+    exec(process.execPath, [main, "ascii", "--help"], { cwd, env }),
+    exec(process.execPath, [standalone, "--help"], { cwd, env }),
+    exec(process.execPath, [legacy, "--help"], { cwd, env }),
+  ]);
+  assert.equal(direct.stdout, active.stdout);
   assert.equal(compatible.stdout, active.stdout);
+  assert.equal(active.stderr + direct.stderr + compatible.stderr, "");
   assert.match(active.stdout, /ascii <input>.*--prepare/s);
   await assert.rejects(exec(process.execPath, [main, "ascii", "-w", "abc", "media.png"], { cwd, env }),
     (error: unknown) => {
@@ -30,6 +38,27 @@ test("routes ASCII help and usage errors through the main CLI", async (t) => {
       return failure.code === 2 && failure.stderr.includes("--cols must be an integer");
     });
   assert.deepEqual(await readdir(cwd), []);
+});
+
+test("exits successfully when the consumer closes its output pipe", async () => {
+  const child = spawn(process.execPath, [main, "ascii", "--help"], { stdio: ["ignore", "pipe", "pipe"] });
+  child.stdout.destroy();
+  let stderr = "";
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+  assert.deepEqual(await once(child, "close"), [0, null]);
+  assert.equal(stderr, "");
+});
+
+test("prepares from the verified cache and suppresses confirmation in quiet mode", asciiIntegration, async () => {
+  const stdout = new CapturedStream();
+  const stderr = new CapturedStream();
+  const app = new CliApplication({ env: { SCORM_ASCII_CACHE: asciiCache, SCORM_LANG: "en" }, stdout, stderr, http: offline });
+
+  assert.equal(await app.run(["ascii", "--prepare", "--quiet"]), 0, stderr.output);
+  assert.equal(stdout.output, "");
+  assert.equal(await app.run(["ascii", "--prepare"]), 0, stderr.output);
+  assert.equal(stdout.output, "ASCII converter ready for offline use.\n");
+  assert.equal(stderr.output, "");
 });
 
 test("runs the portable codecs from another directory with an empty PATH and removes the executables", asciiIntegration, async (t) => {
@@ -99,7 +128,7 @@ test("rejects an unverified codec archive without writing a cache or an automati
   const stdout = new CapturedStream();
   const stderr = new CapturedStream();
   const app = new CliApplication({
-    env: { MOODLE_BASE_URL: "invalid-url" }, cwd, stdout, stderr, http: {
+    env: { MOODLE_BASE_URL: "invalid-url", SCORM_LANG: "en" }, cwd, stdout, stderr, http: {
       async get() {
         return { status: 200, body: Buffer.from("invalid ZIP"), location: undefined, contentType: "", contentDisposition: undefined };
       },
@@ -120,8 +149,9 @@ test("aborts the codec download and returns 130 when interrupted", { skip: !asci
   const interruptions = new CliInterruptions();
   let notifyStarted!: () => void;
   const started = new Promise<void>((resolve) => { notifyStarted = resolve; });
+  const stderr = new CapturedStream();
   const app = new CliApplication({
-    env: {}, cwd, stdout: new CapturedStream(), stderr: new CapturedStream(), interruptions, http: {
+    env: {}, cwd, stdout: new CapturedStream(), stderr, interruptions, http: {
       async get(request) {
         notifyStarted();
         return new Promise<never>((_resolve, reject) => {
@@ -131,7 +161,8 @@ test("aborts the codec download and returns 130 when interrupted", { skip: !asci
     },
   });
   const finished = app.run(["ascii", "--prepare"]);
-  await started;
+  const startedFirst = await Promise.race([started.then(() => true), finished.then(() => false)]);
+  assert.equal(startedFirst, true, stderr.output);
   assert.equal(interruptions.request(130), true);
   assert.equal(await finished, 130);
   assert.equal(interruptions.request(130), false);

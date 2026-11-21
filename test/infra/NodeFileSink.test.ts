@@ -18,7 +18,7 @@ afterEach(() => rm(dir, { recursive: true, force: true }));
 describe("NodeFileSink", () => {
   it("creates missing directories and returns the absolute output path", async () => {
     const target = join(dir, "a", "b", "salida.pdf");
-    const written = await sink.write(target, Uint8Array.of(1, 2, 3));
+    const written = await sink.write(target, Uint8Array.of(1, 2, 3), new AbortController().signal);
     assert.equal(written, target);
     assert.deepEqual([...(await readFile(target))], [1, 2, 3]);
   });
@@ -26,6 +26,10 @@ describe("NodeFileSink", () => {
   it("distinguishes an existing file from a missing path", async () => {
     await sink.write(join(dir, "hay.pdf"), Uint8Array.of(1));
     assert.deepEqual([await sink.exists(join(dir, "hay.pdf")), await sink.exists(join(dir, "no-hay.pdf"))], [true, false]);
+  });
+
+  it("surfaces invalid paths instead of reporting a missing file", async () => {
+    await assert.rejects(sink.exists(join(dir, "invalid\0.pdf")), { code: "ERR_INVALID_ARG_VALUE" });
   });
 
   it("resolves relative paths against the working directory", async () => {
@@ -85,5 +89,12 @@ describe("NodeFileSink", () => {
     await assert.rejects(sink.write(target, Uint8Array.of(1)), OutputError);
     await assert.rejects(sink.writeIfAbsent(target, Uint8Array.of(1)), OutputError);
     assert.deepEqual(await readdir(dir), ["salida.pdf"]);
+  });
+
+  it("preserves the cancellation reason and leaves the output directory empty", async () => {
+    const reason = new Error("Cancelled by caller");
+    const target = join(dir, "course", "slides.pdf");
+    await assert.rejects(sink.write(target, Uint8Array.of(1), AbortSignal.abort(reason)), (error) => error === reason);
+    assert.deepEqual(await readdir(dir), []);
   });
 });

@@ -8,11 +8,11 @@ import { after, before, test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { openAsciiMedia, renderAsciiClip, run } from "../../../src/extensions/ascii/index.ts";
-import { probe } from "../../../src/extensions/ascii/media.ts";
+import { openAsciiMedia, renderAsciiClip, run } from "../../../src/plugins/ascii-fire/index.ts";
+import { probe } from "../../../src/plugins/ascii-fire/media.ts";
 
-import { PortableMediaRuntime } from "../../../src/extensions/ascii/runtime.ts";
-import type { MediaLease } from "../../../src/extensions/ascii/runtime.ts";
+import { PortableMediaRuntime } from "../../../src/plugins/ascii-fire/runtime.ts";
+import type { MediaLease } from "../../../src/plugins/ascii-fire/runtime.ts";
 import { asciiAsset as asset, asciiCache, asciiIntegration as mediaTest, offline } from "../../support/ascii.ts";
 
 const exec = promisify(execFile);

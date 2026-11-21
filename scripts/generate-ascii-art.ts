@@ -1,15 +1,16 @@
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CliInterruptions, withProcessSignals } from "../src/cli/CliInterruptions.ts";
-import { AsciiEngine } from "../src/extensions/ascii/AsciiEngine.ts";
-import type { AsciiClip } from "../src/extensions/ascii/index.ts";
-import { decodeFrames, probe } from "../src/extensions/ascii/media.ts";
-import { PortableMediaRuntime, withMediaTools } from "../src/extensions/ascii/runtime.ts";
-import { en } from "../src/i18n/en.ts";
+import { AsciiEngine } from "../src/plugins/ascii-fire/AsciiEngine.ts";
+import type { AsciiClip } from "../src/plugins/ascii-fire/index.ts";
+import { decodeFrames, probe } from "../src/plugins/ascii-fire/media.ts";
+import { PortableMediaRuntime, withMediaTools } from "../src/plugins/ascii-fire/runtime.ts";
 import { NodeFileSink } from "../src/infra/NodeFileSink.ts";
+import { i18nPlugin } from "../src/plugins/i18n/index.ts";
 
-const directory = fileURLToPath(new URL("../src/extensions/ascii/", import.meta.url));
-const engine = new AsciiEngine({ invert: true, chars: " .,:;!+*#@=|/\\()_'-", tone: 0.65 });
+const directory = fileURLToPath(new URL("../src/plugins/ascii-fire/", import.meta.url));
+const messages = i18nPlugin.resolve({ env: process.env });
+const engine = new AsciiEngine({ invert: true, chars: " .,:;!+*#@=|/\\()_'-", tone: 0.65 }, messages.ascii);
 const cols = 42;
 const fps = 7;
 
@@ -59,17 +60,17 @@ function pose(
 
 async function generate(signal: AbortSignal): Promise<void> {
   const clips: Record<string, AsciiClip> = {};
-  await withMediaTools(new PortableMediaRuntime(), async (tools) => {
+  await withMediaTools(new PortableMediaRuntime({ messages }), async (tools) => {
     for (const [name, scene] of Object.entries(scenes)) {
       const source = join(directory, "content", scene.file);
-      const { width, height, gif } = await probe(tools, source, signal);
+      const { width, height, gif } = await probe(tools, source, signal, messages.ascii);
       const { rows, w, h } = engine.size(width, height, cols, 0.44);
       const decoded = decodeFrames(tools, source, {
         width: w, height: h, fps, still: true, gif, matte: 255, downscale: width >= w && height >= h, signal,
-      });
+      }, messages.ascii);
       try {
         const { value } = await decoded.next();
-        if (!value) throw new Error(`Could not read ${scene.file}.`);
+        if (!value) throw new Error(messages.ascii.animationReadFailed({ file: scene.file }));
         const frames = scene.poses.map((amount) =>
           engine.text(engine.frame(pose(value, w, h, amount, scene.shift), cols, rows)).split("\n"),
         );
@@ -87,7 +88,7 @@ async function generate(signal: AbortSignal): Promise<void> {
     "export const asciiAnimations = " + JSON.stringify(clips, null, 2) + " satisfies Record<string, AsciiClip>;",
     "",
   ].join("\n");
-  await new NodeFileSink({ messages: en, signal }).write(join(directory, "generatedAnimations.ts"), Buffer.from(output));
+  await new NodeFileSink({ messages, signal }).write(join(directory, "generatedAnimations.ts"), Buffer.from(output));
 }
 
 const interruptions = new CliInterruptions();
