@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileTraceSink } from "../../src/tracing/FileTraceSink.ts";
@@ -32,6 +32,21 @@ describe("FileTraceSink", () => {
     assert.equal(await readFile(join(dir, "snapshots", "01-my_courses_page.txt"), "utf8"), "uno");
   });
 
+  it("keeps earlier snapshots when a run directory is reused", async () => {
+    assert.equal(new FileTraceSink({ dir }).snapshot("course", "First snapshot"), true);
+    assert.equal(new FileTraceSink({ dir }).snapshot("course", "Second snapshot"), true);
+
+    assert.equal(await readFile(join(dir, "snapshots", "01-course.txt"), "utf8"), "First snapshot");
+    assert.equal(await readFile(join(dir, "snapshots", "02-course.txt"), "utf8"), "Second snapshot");
+  });
+
+  it("reports a snapshot failure when its filename exceeds the filesystem limit", async () => {
+    const sink = new FileTraceSink({ dir });
+
+    assert.equal(sink.snapshot("x".repeat(300), "Course details"), false);
+    assert.deepEqual(await readdir(join(dir, "snapshots")), []);
+  });
+
   it("suppresses write errors", async () => {
     await writeFile(join(dir, "archivo"), "x");
     const sink = new FileTraceSink({ dir: join(dir, "archivo", "dentro") });
@@ -49,5 +64,29 @@ describe("FileTraceSink", () => {
 
     const paths = [target, snapshots, join(target, "trace.jsonl"), join(snapshots, "01-course.txt")];
     for (const path of paths) assert.equal((await stat(path)).mode & 0o077, 0, path);
+  });
+
+  it("preserves a preexisting group-readable trace file", { skip: process.platform === "win32" }, async () => {
+    const trace = join(dir, "trace.jsonl");
+    await writeFile(trace, "previous trace\n");
+    await chmod(trace, 0o640);
+
+    const sink = new FileTraceSink({ dir });
+    sink.write('{"event":"start"}');
+    assert.equal(await readFile(trace, "utf8"), "previous trace\n");
+    assert.equal(sink.location(), undefined);
+  });
+
+  it("requires a direct directory for diagnostic output", async () => {
+    const target = join(dir, "original");
+    const alias = join(dir, "alias");
+    await mkdir(target);
+    await symlink(target, alias, "junction");
+
+    const sink = new FileTraceSink({ dir: alias });
+    sink.write('{"event":"start"}');
+    assert.equal(sink.snapshot("course", "Course details"), false);
+    assert.equal(sink.location(), undefined);
+    assert.deepEqual(await readdir(target), []);
   });
 });
