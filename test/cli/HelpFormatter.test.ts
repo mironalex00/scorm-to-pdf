@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { HelpFormatter } from "../../src/cli/HelpFormatter.ts";
 import { COMMAND_OPTIONS, GLOBAL_OPTIONS } from "../../src/cli/optionSpecs.ts";
 import { en } from "../../src/i18n/en.ts";
+import { builtInPlugins } from "../../src/composition/plugins.ts";
 
-const text = new HelpFormatter({ programName: "tool", messages: en }).format();
+const text = new HelpFormatter({ programName: "tool", messages: en, plugins: builtInPlugins.commands }).format();
 const lines = text.split("\n");
 
 describe("HelpFormatter", () => {

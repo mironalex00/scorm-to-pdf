@@ -1,25 +1,33 @@
 import type { Messages } from "../i18n/Messages.ts";
-import { ASCII_GLOBAL_OPTIONS, ASCII_OPTIONS, GET_OPTIONS, GLOBAL_OPTIONS, LIST_OPTIONS, SCORM_OPTIONS } from "./optionSpecs.ts";
+import type { CommandPlugin } from "./CommandPlugin.ts";
+import { COMMON_OPTIONS, GET_OPTIONS, GLOBAL_OPTIONS, LIST_OPTIONS, SCORM_OPTIONS } from "./optionSpecs.ts";
 import type { OptionSpec } from "./optionSpecs.ts";
 
 /** Formats help using the option specs and locale catalog. */
 export class HelpFormatter {
   readonly programName: string;
   private readonly messages: Messages;
+  private readonly plugins: readonly CommandPlugin[];
 
-  constructor(deps: { programName: string; messages: Messages }) {
+  constructor(deps: { programName: string; messages: Messages; plugins: readonly CommandPlugin[] }) {
     this.programName = deps.programName;
     this.messages = deps.messages;
+    this.plugins = deps.plugins;
   }
 
   format(): string {
     const { help } = this.messages;
     const program = this.programName;
-    const width = this.width([...GLOBAL_OPTIONS, ...SCORM_OPTIONS, ...LIST_OPTIONS, ...GET_OPTIONS, ...ASCII_OPTIONS]);
+    const width = this.width([
+      ...GLOBAL_OPTIONS, ...SCORM_OPTIONS, ...LIST_OPTIONS, ...GET_OPTIONS,
+      ...this.plugins.flatMap((plugin) => plugin.options),
+    ]);
+    const pluginHelp = this.plugins.map((plugin) => ({ options: plugin.options, ...plugin.describe(this.messages, program) }));
     return [
       ...help.intro({ program }),
       help.commandsHeading(),
       ...help.commandLines({ program }),
+      ...pluginHelp.map(({ listing }) => listing),
       "",
       help.globalHeading(),
       ...this.block(GLOBAL_OPTIONS, width),
@@ -33,9 +41,7 @@ export class HelpFormatter {
       help.getHeading(),
       ...this.block(GET_OPTIONS, width),
       "",
-      help.asciiHeading(),
-      ...this.block(ASCII_OPTIONS, width),
-      "",
+      ...pluginHelp.flatMap(({ heading, options }) => [heading, ...this.block(options, width), ""]),
       ...help.environment(),
       "",
       ...help.exitCodes(),
@@ -45,14 +51,15 @@ export class HelpFormatter {
     ].join("\n");
   }
 
-  formatAscii(): string {
+  formatPlugin(plugin: CommandPlugin): string {
     const { help } = this.messages;
-    const width = this.width([...ASCII_OPTIONS, ...ASCII_GLOBAL_OPTIONS]);
+    const description = plugin.describe(this.messages, this.programName);
+    const width = this.width([...plugin.options, ...COMMON_OPTIONS]);
     return [
-      ...help.asciiIntro({ program: this.programName }), "",
-      help.asciiHeading(), ...this.block(ASCII_OPTIONS, width), "",
-      help.globalHeading(), ...this.block(ASCII_GLOBAL_OPTIONS, width), "",
-      help.asciiEnvironment(), "",
+      ...description.intro, "",
+      description.heading, ...this.block(plugin.options, width), "",
+      help.globalHeading(), ...this.block(COMMON_OPTIONS, width), "",
+      description.footer, "",
     ].join("\n");
   }
 
@@ -61,7 +68,10 @@ export class HelpFormatter {
   }
 
   private block(specs: readonly OptionSpec[], width: number): string[] {
-    return specs.map((spec) => `  ${this.flags(spec).padEnd(width)}  ${this.messages.options[spec.name]}`);
+    return specs.map((spec) => {
+      const description = "describe" in spec ? spec.describe(this.messages) : this.messages.options[spec.name];
+      return `  ${this.flags(spec).padEnd(width)}  ${description}`;
+    });
   }
 
   private flags(spec: OptionSpec): string {

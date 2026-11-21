@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { CliInterruptions, withProcessSignals } from "../src/cli/CliInterruptions.ts";
+import { i18nPlugin } from "../src/plugins/i18n/index.ts";
 
 const run = promisify(execFile);
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 const name = process.platform === "win32" ? "scorm-to-pdf.exe" : "scorm-to-pdf";
+const messages = i18nPlugin.resolve({ env: process.env });
 
 async function build(signal: AbortSignal): Promise<void> {
   await mkdir(dist, { recursive: true });
@@ -20,7 +22,7 @@ async function build(signal: AbortSignal): Promise<void> {
     });
     signal.throwIfAborted();
     await rename(binary, join(dist, name));
-    console.log(`Built dist/${name}`);
+    console.log(messages.build.built({ path: `dist/${name}` }));
   } finally {
     await rm(stage, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 });
   }

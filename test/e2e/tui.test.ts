@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { setTimeout } from "node:timers/promises";
 import { CliApplication } from "../../src/CliApplication.ts";
-import { asciiAnimations } from "../../src/extensions/ascii/generatedAnimations.ts";
+import { asciiAnimations } from "../../src/plugins/ascii-fire/generatedAnimations.ts";
 import { RawTerminal } from "../../src/tui/RawTerminal.ts";
 import type { KeyPress } from "../../src/tui/Terminal.ts";
 import { FakeMoodle } from "../support/FakeMoodle.ts";
@@ -36,7 +36,7 @@ async function run(moodle: LocalServer, keys: KeyPress[], env: Record<string, st
   const terminal = new ScriptedTerminal(keys);
   const stdout = new CapturedStream();
   const stderr = new CapturedStream();
-  const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, ...env }, stdout, stderr, cwd: work, terminal });
+  const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, SCORM_LANG: "en", ...env }, stdout, stderr, cwd: work, terminal });
   const code = await app.run([...argv, "--base-url", moodle.origin]);
   return { code, terminal, stdout: stdout.output, stderr: stderr.output };
 }
@@ -84,7 +84,7 @@ describe("Interactive selector", () => {
     const stdout = new CapturedStream(true, 80);
     const stderr = new CapturedStream();
     const terminal = new RawTerminal({ input, output: stdout });
-    const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE }, stdout, stderr, cwd: work, terminal });
+    const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, SCORM_LANG: "en" }, stdout, stderr, cwd: work, terminal });
     const finished = app.run(["--base-url", moodle.origin]);
 
     async function screen(text: string, offset = 0) {
@@ -190,7 +190,7 @@ describe("Noninteractive terminals", () => {
     const terminal = new ScriptedTerminal([]);
     terminal.interactive = false;
     const stderr = new CapturedStream();
-    const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE }, stdout: new CapturedStream(), stderr, cwd: work, terminal });
+    const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, SCORM_LANG: "en" }, stdout: new CapturedStream(), stderr, cwd: work, terminal });
     assert.equal(await app.run([]), 2);
     assert.match(stderr.output, /The interactive selector requires a terminal/);
     assert.equal(terminal.opened, 0);

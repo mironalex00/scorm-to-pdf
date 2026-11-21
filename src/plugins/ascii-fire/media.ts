@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
+import { en } from "../../i18n/en.ts";
+import type { Messages } from "../../i18n/Messages.ts";
 import type { MediaTools } from "./runtime.ts";
 
 const PROBE_TIMEOUT_MS = 20_000;
@@ -34,9 +36,9 @@ interface Process {
   readonly done: Promise<Error | undefined>;
 }
 
-export function mediaInput(input: string, cwd = process.cwd()): string {
+export function mediaInput(input: string, cwd = process.cwd(), messages = en.ascii): string {
   if (/^https?:\/\//i.test(input)) return input;
-  if (input.trim() === "") throw new Error("Specify an input file.");
+  if (input.trim() === "") throw new Error(messages.noInput());
   return resolve(cwd, input);
 }
 
@@ -53,14 +55,7 @@ function rate(value: string | undefined): number {
   return Number.isFinite(fps) && fps > 0 ? fps : 0;
 }
 
-function toolError(name: "ffmpeg" | "ffprobe", error: unknown): Error {
-  if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
-    return new Error("Could not launch " + name + " from the temporary directory.", { cause: error });
-  }
-  return error instanceof Error ? error : new Error(String(error));
-}
-
-export async function probe(tools: MediaTools, input: string, signal?: AbortSignal): Promise<MediaInfo> {
+export async function probe(tools: MediaTools, input: string, signal?: AbortSignal, messages = en.ascii): Promise<MediaInfo> {
   signal?.throwIfAborted();
   const timeout = AbortSignal.timeout(PROBE_TIMEOUT_MS);
   const stopProbe = signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -68,7 +63,7 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
     "-v", "error", ...inputOptions(input), "-show_entries",
     "format=format_name:stream=codec_type,width,height,avg_frame_rate,r_frame_rate:stream_tags=rotate:stream_side_data=rotation",
     "-of", "json", "-i", input,
-  ], stopProbe, input);
+  ], messages, stopProbe, input);
   process.child.stdin.end();
   const chunks: Buffer[] = [];
   let total = 0;
@@ -76,7 +71,7 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
     for await (const chunk of process.child.stdout.iterator({ destroyOnReturn: false })) {
       const bytes = chunk as Buffer;
       total += bytes.length;
-      if (total > MAX_PROBE_BYTES) throw new Error("The input contains too much metadata.");
+      if (total > MAX_PROBE_BYTES) throw new Error(messages.tooMuchMetadata());
       chunks.push(bytes);
     }
     stopProbe.throwIfAborted();
@@ -94,7 +89,7 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
   const height = video?.height;
   if (!video || !width || !height || !Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
       width < 1 || height < 1 || width * height > 50_000_000) {
-    throw new Error("No image or video with valid dimensions was found in the input.");
+    throw new Error(messages.invalidMedia());
   }
   const rotation = Number(video.side_data_list?.find((entry) => entry.rotation !== undefined)?.rotation ?? video.tags?.rotate ?? 0);
   const sideways = Math.abs(rotation) % 180 === 90;
@@ -109,7 +104,7 @@ export async function probe(tools: MediaTools, input: string, signal?: AbortSign
   };
 }
 
-function spawnTool(tools: MediaTools, name: keyof MediaTools, args: string[], signal?: AbortSignal, input?: string): Process {
+function spawnTool(tools: MediaTools, name: keyof MediaTools, args: string[], messages: Messages["ascii"], signal?: AbortSignal, input?: string): Process {
   const env: NodeJS.ProcessEnv = {};
   if (input && /^https?:\/\//i.test(input)) {
     for (const key of NETWORK_ENV) env[key] = process.env[key];
@@ -121,17 +116,19 @@ function spawnTool(tools: MediaTools, name: keyof MediaTools, args: string[], si
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr = (stderr + chunk).slice(-4096); });
   const done = new Promise<Error | undefined>((resolveDone) => {
     let failure: Error | undefined;
-    child.on("error", (error) => { failure = toolError(name, error); });
+    child.on("error", (error: NodeJS.ErrnoException) => {
+      failure = error.code === "ENOENT" ? new Error(messages.toolLaunchFailed({ tool: name }), { cause: error }) : error;
+    });
     child.once("close", (code, stopSignal) => {
       const detail = input ? stderr.trim().replaceAll(input, "[input]") : stderr.trim();
-      resolveDone(failure ?? (code === 0 ? undefined : new Error(detail || name + " exited with " + (stopSignal ?? code) + ".")));
+      resolveDone(failure ?? (code === 0 ? undefined : new Error(messages.toolExited({ tool: name, status: String(stopSignal ?? code), detail }))));
     });
   });
   return { child, done };
 }
 
-function ffmpeg(tools: MediaTools, args: string[], signal?: AbortSignal, input?: string): Process {
-  return spawnTool(tools, "ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], signal, input);
+function ffmpeg(tools: MediaTools, args: string[], messages: Messages["ascii"], signal?: AbortSignal, input?: string): Process {
+  return spawnTool(tools, "ffmpeg", ["-hide_banner", "-loglevel", "error", "-nostdin", ...args], messages, signal, input);
 }
 
 async function stop(process: Process): Promise<void> {
@@ -144,6 +141,7 @@ export async function* decodeFrames(
   tools: MediaTools,
   input: string,
   options: { width: number; height: number; fps: number; still: boolean; gif: boolean; matte: number; downscale: boolean; signal?: AbortSignal },
+  messages = en.ascii,
 ): AsyncGenerator<Buffer> {
   const { width, height, fps, still, gif, matte, signal } = options;
   signal?.throwIfAborted();
@@ -156,7 +154,7 @@ export async function* decodeFrames(
     ...inputOptions(input), ...(gif ? ["-ignore_loop", "1"] : []), "-i", input,
     "-map", "0:v:0", "-an", "-sn", "-vf", filters.join(","),
     ...(still ? ["-frames:v", "1"] : []), "-threads", "1", "-pix_fmt", "rgba", "-f", "rawvideo", "pipe:1",
-  ], signal, input);
+  ], messages, signal, input);
   process.child.stdin.end();
   const size = width * height * 4;
   const rgba = Buffer.allocUnsafe(size);
@@ -184,7 +182,7 @@ export async function* decodeFrames(
     const failure = await process.done;
     if (failure) throw failure;
     signal?.throwIfAborted();
-    if (filled !== 0) throw new Error("FFmpeg returned an incomplete frame.");
+    if (filled !== 0) throw new Error(messages.incompleteFrame());
   } finally {
     await stop(process);
   }
@@ -207,6 +205,7 @@ export async function encodeFrames(
   output: string,
   options: { width: number; height: number; fps: number; format: RasterFormat; audio?: string; signal?: AbortSignal },
   frames: AsyncIterable<Buffer>,
+  messages = en.ascii,
 ): Promise<void> {
   const { width, height, fps, format, audio, signal } = options;
   signal?.throwIfAborted();
@@ -215,7 +214,7 @@ export async function encodeFrames(
   // Pad short audio so the video determines the output duration.
   if (audio) args.push(...inputOptions(audio), "-i", audio, "-map", "0:v:0", "-map", "1:a:0", "-af", "apad", "-shortest");
   args.push(...CODECS[format], "-threads", "1", output);
-  const process = ffmpeg(tools, args, signal, audio);
+  const process = ffmpeg(tools, args, messages, signal, audio);
   process.child.stdout.resume();
   try {
     for await (const frame of frames) {

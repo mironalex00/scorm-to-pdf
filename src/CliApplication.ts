@@ -2,12 +2,12 @@ import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { SessionCookie } from "./application/SessionCookie.ts";
 import type { HttpClient } from "./application/ports.ts";
-import { CliParser } from "./cli/CliParser.ts";
+import { CliParser, previewCommand } from "./cli/CliParser.ts";
+import type { CommandPreview } from "./cli/OptionCollector.ts";
 import type { CommonOptions, MoodleCommand } from "./cli/commands.ts";
 import { CliInterruptions } from "./cli/CliInterruptions.ts";
 import { HelpFormatter } from "./cli/HelpFormatter.ts";
 import { CoursesCommand } from "./commands/CoursesCommand.ts";
-import { AsciiCommand } from "./commands/AsciiCommand.ts";
 import type { Command } from "./commands/Command.ts";
 import { DiagnoseCommand } from "./commands/DiagnoseCommand.ts";
 import { GetCommand } from "./commands/GetCommand.ts";
@@ -16,15 +16,15 @@ import { ScormCommand } from "./commands/ScormCommand.ts";
 import { TuiCommand } from "./commands/TuiCommand.ts";
 import { ServiceFactory } from "./composition/ServiceFactory.ts";
 import type { Services } from "./composition/ServiceFactory.ts";
+import { builtInAnimations, builtInPlugins } from "./composition/plugins.ts";
 import { AppError, UsageError, errorMessage } from "./domain/errors.ts";
 import { ExtensionRegistry } from "./extensions/ExtensionRegistry.ts";
 import type { ResolvedPlatform } from "./extensions/ExtensionRegistry.ts";
 import { extension as utcluj } from "./extensions/ro/utcluj/kb/index.ts";
-import { LocaleResolver } from "./i18n/LocaleResolver.ts";
 import type { Messages } from "./i18n/Messages.ts";
-import { en } from "./i18n/en.ts";
 import type { OutputStream } from "./infra/ConsoleLogger.ts";
 import { plainLine, plainOutput } from "./infra/plainText.ts";
+import type { PluginRegistry } from "./plugins/PluginRegistry.ts";
 import { CookiePrompt } from "./tui/CookiePrompt.ts";
 import { FrameLayout } from "./tui/FrameLayout.ts";
 import type { Terminal } from "./tui/Terminal.ts";
@@ -48,11 +48,11 @@ export interface CliApplicationDeps {
   /** Interactive input and output for the course selector. */
   readonly terminal?: Terminal | undefined;
   readonly interruptions?: CliInterruptions;
+  readonly plugins?: PluginRegistry;
 }
 
 interface RunState {
   messages: Messages;
-  locale: string;
   redactor: Redactor;
   tracer?: Tracer;
   diagnosed?: boolean;
@@ -68,7 +68,7 @@ export class CliApplication {
   private readonly interruptions: CliInterruptions;
   private readonly cwd: string;
   private readonly terminal: Terminal | undefined;
-  private readonly locales = new LocaleResolver({ catalogs: { en }, defaultLocale: "en" });
+  private readonly plugins: PluginRegistry;
 
   constructor(deps: CliApplicationDeps) {
     this.env = deps.env;
@@ -78,17 +78,17 @@ export class CliApplication {
     this.terminal = deps.terminal;
     this.http = deps.http;
     this.interruptions = deps.interruptions ?? new CliInterruptions();
+    this.plugins = deps.plugins ?? builtInPlugins;
     this.factory = new ServiceFactory({ http: deps.http, stdout: deps.stdout, stderr: deps.stderr });
   }
 
   async run(argv: readonly string[]): Promise<number> {
-    const state: RunState = { messages: en, locale: "en", redactor: new Redactor() };
+    const state: RunState = { messages: this.plugins.language.fallback, redactor: new Redactor() };
     let code: number;
     try {
-      const resolved = this.locales.resolve({ flag: this.peekLang(argv), env: this.env });
-      state.messages = resolved.messages;
-      state.locale = resolved.locale;
-      code = await this.execute(argv, state);
+      const preview = previewCommand(argv, this.plugins.commands);
+      state.messages = this.plugins.language.resolve({ flag: preview.language, env: this.env });
+      code = await this.execute(argv, state, preview);
     } catch (error) {
       code = this.report(error, state);
     }
@@ -102,15 +102,16 @@ export class CliApplication {
     return code;
   }
 
-  private async execute(argv: readonly string[], state: RunState): Promise<number> {
+  private async execute(argv: readonly string[], state: RunState, preview: CommandPreview): Promise<number> {
     const { messages } = state;
     const parser = new CliParser({
       version: VERSION,
       env: this.env,
       messages,
-      help: new HelpFormatter({ programName: PROGRAM_NAME, messages }),
+      help: new HelpFormatter({ programName: PROGRAM_NAME, messages, plugins: this.plugins.commands }),
+      plugins: this.plugins.commands,
     });
-    const command = parser.parse(argv);
+    const command = parser.parse(argv, preview);
     if (command.kind === "help" || command.kind === "version") {
       this.stdout.write(command.text);
       return 0;
@@ -118,12 +119,16 @@ export class CliApplication {
 
     const { redactor } = state;
     const tracer = this.createTracer(command.global, command.kind === "diagnose", state);
-    if (command.kind === "ascii") {
-      tracer.event("info", "app", "run.start", { command: command.kind, action: command.request.kind });
-      return new AsciiCommand({
-        request: command.request, cwd: this.cwd, env: this.env, stdout: this.stdout,
-        messages, http: this.http, interruptions: this.interruptions, tracer, quiet: command.global.quiet,
-      }).run();
+    if (command.kind === "plugin") {
+      const { plugin, invocation } = command;
+      tracer.event("info", "app", "run.start", { command: plugin.command, plugin: plugin.id, action: invocation.action });
+      const env = Object.fromEntries(plugin.environmentKeys.map((key) => [key, this.env[key]]));
+      return this.interruptions.run((signal) => tracer.span(plugin.command, invocation.action, {}, () =>
+        invocation.run({
+          cwd: this.cwd, env, stdout: this.stdout,
+          messages, http: this.http, signal, quiet: command.global.quiet,
+        }),
+      ));
     }
     const { global } = command;
     const registry = new ExtensionRegistry({ extensions: [utcluj], defaultId: utcluj.id, messages });
@@ -132,7 +137,7 @@ export class CliApplication {
       version: VERSION,
       runtime: `${process.release.name} ${process.version}; bun ${process.versions.bun ?? "none"}`,
       os: process.platform,
-      locale: state.locale,
+      locale: messages.locale,
       command: command.kind,
       platform: resolved.extension.id,
       origin: resolved.baseUrl.origin,
@@ -147,7 +152,7 @@ export class CliApplication {
 
       const tuiLogger = command.kind === "tui" ? new TuiLogger() : undefined;
       const services = this.factory.create({
-        messages, locale: state.locale, tracer, redactor, global, resolved, cookie, logger: tuiLogger, signal,
+        messages, locale: messages.locale, tracer, redactor, global, resolved, cookie, logger: tuiLogger, signal,
       });
       return this.build(command, services, { resolved, messages, tracer, layout, tuiLogger, signal }).run();
     });
@@ -208,6 +213,7 @@ export class CliApplication {
             stderr: this.stderr,
             cwd: this.cwd,
             signal: context.signal,
+            animations: builtInAnimations,
           }),
         });
     }
@@ -228,14 +234,6 @@ export class CliApplication {
       ringSize: 0,
     });
     return state.tracer;
-  }
-
-  private peekLang(argv: readonly string[]): string | undefined {
-    const terminator = argv.indexOf("--");
-    const index = argv.findIndex((arg) => arg === "--lang" || arg.startsWith("--lang="));
-    if (index === -1 || (terminator !== -1 && index > terminator)) return undefined;
-    const arg = argv[index]!;
-    return arg.startsWith("--lang=") ? arg.slice("--lang=".length) : argv[index + 1];
   }
 
   private report(error: unknown, { messages, redactor }: RunState): number {

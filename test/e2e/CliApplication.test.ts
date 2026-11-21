@@ -40,7 +40,7 @@ interface RunResult {
 async function run(argv: string[], env: Record<string, string | undefined> = {}, http?: HttpClient): Promise<RunResult> {
   const stdout = new CapturedStream();
   const stderr = new CapturedStream();
-  const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, ...env }, stdout, stderr, http, cwd: traceRoot });
+  const app = new CliApplication({ env: { MOODLE_COOKIE: COOKIE, SCORM_LANG: "en", ...env }, stdout, stderr, http, cwd: traceRoot });
   const code = await app.run(argv);
   return { code, stdout: stdout.output, stderr: stderr.output };
 }
